@@ -191,6 +191,83 @@ Do not answer “listwise is always best”. Compare data volume, label quality,
       pitfalls: ['Saying pairwise scores are calibrated click probabilities.', 'Comparing an app for one query with an app for a different query.', 'Claiming a listwise loss directly and exactly optimizes every ranking metric.'],
       checkpoint: { question: 'For a pairwise loss based on sA − sB, what happens if you add 10 to both scores?', options: ['The predicted preference flips', 'The preference probability becomes 1', 'The predicted preference is unchanged'], correct: 2, explanations: ['The difference does not change, so the order does not flip.', 'A common shift does not increase the score difference.', 'Correct. (sA+10) − (sB+10) equals sA − sB. Absolute score values are not sufficient to interpret this preference as a click probability.'] }
     },
+    {
+      id: 'ranking-models', phase: 'Build a ranker', title: 'LambdaMART, neural rankers, and model trade-offs', minutes: 8,
+      subtitle: 'Choose a model because of its constraints, not its novelty.', bridge: [6, 20, 21, 24], sources: ['lambdamart'],
+      blocks: [
+        { title: 'Connect LambdaMART to boosting', body: `You already know gradient boosting: add trees to improve a current model. LambdaMART applies boosted trees to ranking, using metric-informed preference updates. Its lambda gradients emphasize swaps according to their ranking impact, commonly a change in NDCG.
+
+Conceptually, correcting a misplaced highly relevant item near the top should count more than swapping two weak items near the bottom. This is not the same as differentiating the discrete sort operation exactly, and it does not guarantee that every update improves measured NDCG.
+
+Know query-grouped training, graded labels, and validation by ranking quality. A tabular ranker is a practical choice when text/embedding similarity, metadata, and behavior-derived features already summarize the input. Audit overfitting and feature availability as you would for ordinary boosting.` },
+        { title: 'Know the neural alternatives', body: `A small MLP can combine dense and structured features. A bi-encoder scores independently encoded queries and apps efficiently. A **cross-encoder** jointly encodes query and app text, allowing rich token interactions, but requires separate work for each query–app pair. It is therefore often more plausible as a limited reranking stage than an exhaustive catalog scorer.
+
+Choose based on measured gains and cost. “Transformer” does not tell the reviewer whether representations are cached, whether pairwise interactions exist, or whether latency is affordable. Explain those distinctions.
+
+For multi-task models, a shared representation can support click and conversion heads. Define labels carefully: an install-given-click model is conditional, whereas an install-per-impression model is not. The heads can share useful evidence or interfere; compare losses, weights, and task-specific performance.` },
+        { title: 'A sensible model progression', body: `1. Establish lexical retrieval and a simple scoring baseline.
+2. Add query–item features and compare a tree or linear ranker.
+3. Test ranking-aware objectives with clean groups and labels.
+4. Add semantic representations where error analysis shows a gap.
+5. Consider a more expensive reranker only if the gain survives latency and online evaluation.
+
+Use ablations to separate gains from better labels, more candidates, new features, and model architecture. Multi-objective selection may involve relevance, discovery quality, safety, and long-term value. Some requirements are hard constraints, not weights to trade away.` }
+      ],
+      prompt: 'Why choose LambdaMART instead of a transformer, and when might you add a cross-encoder?',
+      answer: `“LambdaMART can exploit heterogeneous query–item features with a ranking-aware training signal and a manageable serving footprint. A cross-encoder can capture richer text interactions but is more expensive per candidate. I would compare both on identical candidate sets and labels, then decide whether a limited neural reranking stage earns its quality gain within the latency budget.”`,
+      pitfalls: ['Claiming LambdaMART is a listwise model merely because its updates use NDCG.', 'Saying cross-encoders let you precompute the entire query–app matching computation.', 'Attributing a gain to architecture when candidate sets and labels also changed.'],
+      checkpoint: { question: 'Why is a cross-encoder generally more expensive than a bi-encoder for large-catalog retrieval?', options: ['It cannot learn from text', 'It jointly processes each query–item pair rather than reuse independent item vectors for similarity search', 'It requires every label to be binary'], correct: 1, explanations: ['Text matching is one of its main strengths.', 'Correct. Rich pair interactions add work per candidate, which favors using it on a smaller set.', 'Label format is not the reason for the serving cost.'] }
+    },
+    {
+      id: 'ranking-metrics', phase: 'Evaluate and explain', title: 'Ranking metrics you can calculate and defend', minutes: 10,
+      subtitle: 'Know what each metric rewards, and what it misses.', bridge: [2, 16], sources: ['metrics'], lab: true,
+      blocks: [
+        { title: 'Set-based top-K metrics and first success', body: `Define what “relevant” means before calculating a metric. For binary judgments, **Precision@K = relevant items in the first K / K**. **Recall@K = relevant items in the first K / all relevant items in the evaluation universe**. If the reference labels cover only a judged pool, say so; you do not know full-catalog recall automatically.
+
+With two relevant apps in a toy catalog and one in the top three, precision is 1/3 and recall is 1/2. **Hit rate@K** records whether there is at least one relevant item. With multiple relevant items, it is not the same as recall.
+
+**Reciprocal rank** is 1 divided by the rank of the first relevant result, or zero if no relevant result is found in the evaluated list. Average over queries to get MRR. It is useful for a first-success task, but ignores later relevant items.` },
+        { title: 'Graded relevance and NDCG', body: `NDCG rewards putting highly relevant items early. Choose and document a gain function; this course uses **gain = 2^grade - 1**. At position i, discount by **log2(i+1)**. Sum the discounted gains through K to get DCG@K, and divide by the best possible DCG@K under the same judgments to get NDCG@K.
+
+For grades [2,3,0] at K=3, DCG is **3 + 7/log2(3) + 0 = 7.417**. If the known ideal top three grades are [3,2,1], IDCG is **7 + 3/log2(3) + 1/2 = 9.393**. NDCG@3 is about **0.790**. Some conventions use linear gains; do not compare values from different conventions blindly.
+
+An all-zero group has zero IDCG. Specify how it is handled rather than divide by zero. Report query-level averages and useful slices; popularity-weighted averages and equal-query averages emphasize different populations.` },
+        { title: 'MAP and why offline metrics are not the product', body: `For binary labels, average precision sums Precision@i at relevant ranks and divides by the total number of known relevant items. Mean over queries for MAP. For AP@K, denominator conventions vary, so explicitly document your implementation. NDCG is convenient when usefulness is graded; MAP emphasizes retrieving multiple binary-relevant items.
+
+Use candidate recall for retrieval, top-K rank quality for ranking, and online task outcomes for the full product. ROC-AUC across arbitrary query–item pairs can look excellent while the first results for an important query are poor.
+
+A metric is a proxy. Install conversion alone may favor familiar apps or conceal poor-quality discovery. Pair it with query success, reformulations, quality slices, appropriate long-term measures, and operational guardrails. Choose metrics from the goal rather than reciting every metric name.` }
+      ],
+      prompt: 'Explain NDCG versus MRR, and select metrics for retrieval and final app-search ranking.',
+      answer: `“MRR measures the position of the first relevant result, so it suits navigational success. NDCG discounts lower positions and supports graded relevance, so it suits broader ranked usefulness. I would measure candidate recall before ranking, evaluate top-K quality by intent and language, and validate product impact online. I would state the judgment pool, gain function, cutoff, and zero-relevance convention.”`,
+      pitfalls: ['Using accuracy as the sole measure of a ranked results page.', 'Calculating IDCG from a different label convention than DCG.', 'Claiming NDCG improvement proves higher user satisfaction.'],
+      checkpoint: { question: 'A query usually seeks one specific app. Which metric most directly captures how soon the first relevant result appears?', options: ['MRR', 'Global classification accuracy', 'Number of indexed apps'], correct: 0, explanations: ['Correct. Reciprocal rank focuses on the first relevant result; MRR averages it across queries.', 'Accuracy ignores the position of that desired app.', 'Catalog size describes inventory, not ordering quality.'] }
+    },
+    {
+      id: 'feedback-bias', phase: 'Evaluate and explain', title: 'Clicks are observations, not ground truth', minutes: 8,
+      subtitle: 'Reason about exposure, counterfactuals, and feedback loops.', bridge: [16, 17, 25], sources: ['bias'],
+      blocks: [
+        { title: 'Separate relevance from visibility', body: `A top result may get more clicks because it is useful, because it is easy to see, or both. **Position bias** is the effect of placement on observation or action. Exposure/selection bias also arises because the old system chooses which apps get shown at all. Attractive presentation can further affect behavior.
+
+Imagine app A has 80 clicks from 1,000 top-position impressions and app B has 20 from 200 lower-position impressions. Raw clicks favor A, rates favor B, but neither comparison alone identifies intrinsic relevance: query mix, visibility, and user differences are uncontrolled.
+
+Logs train the next model, which controls future exposure. Popular apps can receive more feedback and become easier to recommend, reinforcing themselves. This feedback loop can hurt new apps and long-tail needs.` },
+        { title: 'What inverse propensity weighting can and cannot do', body: `A simplified position model writes **P(click at position k) = P(examined at k) × P(attractive | examined)** under strong assumptions. If examination probabilities are known or estimated suitably, inverse propensity weighting (IPW/IPS) gives under-observed examples more weight.
+
+For an observed event with exposure propensity p, a schematic weight is **1/p**. Small p creates high variance, so clipping or stabilization may be necessary and can introduce bias. Explain the trade-off rather than present IPW as a magic fix.
+
+The logging policy must provide support for the alternatives you evaluate. Zero exposure probability cannot be repaired by dividing by zero or inventing labels. Safe randomized exposure, well-designed interventions, and independent judged sets can help; they need user-quality safeguards.` },
+        { title: 'How to speak about this in a technical review', body: `First identify the bias mechanism, then its consequence, then a measurement or intervention. For example: “Clicks favor higher slots, so naively treating them as relevance could teach the model the old presentation policy. I would combine semantic judgments with behavior, audit positions and coverage, and evaluate a justified debiasing approach or controlled exploration.”
+
+Do not assume adding position as an ordinary prediction feature solves relevance learning. It can help model exposure-dependent behavior, but the resulting score may still depend on the old serving arrangement. State what you want to estimate and how inference differs from logging.
+
+Distinguish relevance prediction from causal incremental impact. A high predicted chance of a download does not mean showing that app caused the download. That distinction matters especially for notifications and marketing.` }
+      ],
+      prompt: 'Why are click labels biased, and how would you learn relevance more responsibly?',
+      answer: `“Users can only interact with what is exposed, and higher positions receive different attention. Click labels therefore mix relevance with the logging policy. I would use exposure-aware analysis, independent relevance judgments, and controlled exploration where appropriate. Propensity weighting can help under suitable assumptions and support, but inaccurate propensities and small-probability events introduce error and variance.”`,
+      pitfalls: ['Equating “not clicked” with “not relevant”.', 'Claiming propensity weighting fixes unexposed inventory without support.', 'Confusing high response probability with incremental causal impact.'],
+      checkpoint: { question: 'An app had zero probability of being exposed by the logging policy. Can simple inverse propensity weighting estimate its counterfactual clicks from those logs?', options: ['Yes, assign an infinite weight', 'Yes, use a larger tree', 'No, the logs lack support for that app’s exposure'], correct: 2, explanations: ['An infinite weight does not create missing evidence.', 'Model capacity cannot identify an unsupported counterfactual from those logs alone.', 'Correct. You need additional evidence, assumptions, or a suitable intervention; IPW does not recover outcomes with zero exposure support.'] }
+    },
   ],
   cases: [
   ]
