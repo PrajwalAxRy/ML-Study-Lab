@@ -1,0 +1,14 @@
+{
+  "name": "ml-study-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A local, gamified learning workspace for machine-learning revision and applied case studies.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node tests/learning.test.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
