@@ -295,6 +295,81 @@ Coordinate features and retrieval embeddings with model versions. A new user/que
       pitfalls: ['Saving only weights without preprocessing.', 'Treating a mutable alias as historical provenance.', 'Promoting every completed training run.'],
       checkpoint: { question: 'Why record an immutable version as well as a current alias?', options: ['Aliases cannot route requests', 'Aliases move; earlier predictions need exact provenance', 'Feature compatibility never matters'], correct: 1, explanations: ['Aliases can be useful routing handles.', 'Correct. Historical decisions need the version actually served.', 'Schema and feature compatibility still matter.'] }
     },
+    {
+      id: 'prod-serving', phase: 'Train and serve', title: 'Batch, synchronous, and asynchronous predictions', minutes: 8,
+      subtitle: 'Choose when and where the model runs.', bridge: [25, 26, 27], sources: [],
+      blocks: [
+        { title: 'Choose by deadline and freshness', body: `Batch prediction computes outputs in advance for later lookup. It can fit daily forecasts or precomputed scores when freshness allows. Synchronous prediction responds inside an application deadline. Asynchronous prediction accepts a job for later completion with an identifier and result-retrieval path.
+
+These patterns can coexist: precompute recommendation candidates, fetch fresh keyed features, then rank synchronously. A heavy media-processing job can be asynchronous. ML alone does not imply a live GPU API.
+
+Batch outputs need entity keys, versions, and validity windows. Async jobs need duplicate handling, status, permissions, cancellation rules, and retention. Each pattern trades freshness, user waiting, resource use, and operational complexity.` },
+        { title: 'Build the live request path', body: `Validate the request and identity, resolve permitted context, retrieve features or candidates, run compatible preprocessing and a loaded model, apply hard constraints, and return a result. Record safe request IDs, artifact versions, timings, and fallback reasons.
+
+Load the model at worker startup or a controlled transition rather than deserialize it for every request. Readiness checks should prevent traffic arriving before required artifacts are usable.
+
+Budget the complete path: routing, queue wait, features, retrieval, inference, policy checks, and serialization. Bound retries and dependencies. A timeout leads to a documented fallback or clear error, not an unlimited cascade of new work.` },
+        { title: 'Connect outputs to actual outcomes', body: `Returned results are not necessarily displayed, and displayed results do not automatically cause an outcome. Log permitted exposure events separately and link later labels through a defined request and attribution window.
+
+Define schemas for scores, probabilities, lists, and error states. Handle empty candidates, unknown categories, and missing features consistently. Fail-open versus fail-closed behavior depends on product risk; a personalization fallback must not bypass mandatory availability or safety checks.
+
+Test contract and policy behavior independently from offline model quality. A correct high-scoring app that cannot be served is a system failure. Deployment readiness includes request handling and fallback coverage, not just model loading.` }
+      ],
+      prompt: 'Choose patterns for daily forecasts and live recommendations, then describe request handling and fallback.',
+      answer: `“Daily outputs may be batch if their validity window fits. Live recommendations can combine precomputed candidates with synchronous features and ranking. I would load a compatible versioned model, budget the full path, validate hard constraints, and log safe provenance and exposure. Timeouts and missing inputs need bounded behavior and risk-appropriate fallbacks.”`,
+      pitfalls: ['Reloading large weights for every request.', 'Ignoring dependency and queue time.', 'Bypassing eligibility with a personalization fallback.'],
+      checkpoint: { question: 'What fits a daily score consumed tomorrow without live freshness requirements?', options: ['Always a synchronous GPU API', 'A fresh raw-history scan for every read', 'Validated batch predictions with versioned keyed outputs'], correct: 2, explanations: ['That complexity needs a workload justification.', 'Repeated history scans create unnecessary request work.', 'Correct. Batch output can meet a bounded freshness contract efficiently.'] }
+    },
+    {
+      id: 'prod-scaling', phase: 'Train and serve', title: 'Scale throughput, partitions, workers, and backlog', minutes: 10,
+      subtitle: 'Calculate the bottleneck before adding machines.', bridge: [16, 25], sources: ['kafka', 'autoscaling'], lab: 'capacity',
+      blocks: [
+        { title: 'Define the unit and estimate work', body: `Distinguish events per second, bytes per second, requests per second, and model calls per request. A recommendation request may score many candidates. An event processor may wait on a sink or database as much as it uses CPU.
+
+If a measured worker handles 250 events/s and four balanced workers can work concurrently, an idealized capacity is 1,000 events/s. At 1,200 arrivals/s, backlog grows by 200 events/s. A broker absorbs a burst only for a bounded period; it does not create downstream processing capacity.
+
+For a backlog B and constant continuing arrivals λ below capacity μ, ideal drain time is **B / (μ − λ)**, not B/μ. If μ is at or below λ, the system cannot drain the backlog while that load continues. Real systems need measurement for variability, I/O limits, and skew.` },
+        { title: 'Partitioning bounds useful parallel work', body: `In a conventional partition-assigned Kafka consumer group, a partition is handled by one assigned consumer at a time. More consumers than usable partitions do not increase that group's partition-processing parallelism. Other protocols and internal processing patterns can differ; specify the design you mean.
+
+Partition choice trades concurrency, ordering scope, state ownership, and rebalancing work. A hot entity can dominate one partition while other workers are idle. Preserving strict per-entity order can limit how that key can be split.
+
+The calculator below assumes one worker stream per assigned partition, evenly balanced partitions, and a measured per-worker rate. It shows why adding workers alone can fail. It is not a Kafka benchmark, an autoscaler, or a prediction of a specific production deployment.` },
+        { title: 'Add headroom and control pressure', body: `Do not plan only for mean arrival rate. Consider bursts, failure of a worker, rebalance time, and how quickly a delayed feature must catch up. A 70% target load in the exercise is an illustrative headroom choice, not a universal standard.
+
+Scale on signals that represent work: consumer lag and age, request concurrency, queue depth, dependency saturation, or model throughput. CPU alone can miss an I/O bottleneck. Autoscaling has delay, resource limits, and cold starts; it is not instantaneous recovery.
+
+Bound queues and apply appropriate rate limits or backpressure. Investigate sink capacity, key skew, connection limits, and serialization before multiplying workers. Extra producers or replicas cannot repair a slow downstream query. Test peak and recovery conditions with representative data sizes.` }
+      ],
+      prompt: 'Estimate whether a stream can keep up, how backlog drains, and why additional workers might not help.',
+      answer: `“I would measure arrival volume and representative service rate, identify usable parallelism and downstream limits, then compare offered load with effective capacity. Backlog drains only from spare capacity after continuing arrivals. Conventional consumer-group partitions, hotspots, sink I/O, and recovery delay can limit scaling, so I would test headroom and monitor lag age, not just worker count.”`,
+      pitfalls: ['Using average throughput without burst or failure headroom.', 'Computing drain time without continuing arrivals.', 'Assuming workers beyond assigned partitions always increase consumption.'],
+      checkpoint: { question: 'Backlog is 12,000 events, arrivals are 1,200/s, and effective capacity is 2,000/s. What is the ideal drain time?', options: ['6 seconds', 'The backlog can never drain', '15 seconds'], correct: 2, explanations: ['That ignores new arrivals during recovery.', 'Capacity exceeds continuing arrivals, so spare capacity exists.', 'Correct. Spare capacity is 800/s, so 12,000 / 800 = 15 seconds under the stated ideal assumptions.'] }
+    },
+    {
+      id: 'prod-performance', phase: 'Train and serve', title: 'Inference performance and end-to-end latency', minutes: 8,
+      subtitle: 'Balance throughput, tail latency, resources, and quality.', bridge: [20, 21, 25], sources: ['batching'],
+      blocks: [
+        { title: 'Measure the whole request', body: `Break down queueing, feature retrieval, candidate generation, preprocessing, model execution, policy checks, and serialization. p95 or p99 latency describes a tail of the measured distribution; averages can conceal slow requests.
+
+Do not simply add each stage's independently measured p95 and call it the end-to-end p95. Percentiles do not add that way. Use request traces and measure the complete response distribution under representative traffic.
+
+Benchmark warm and cold behavior, request sizes, concurrency, batch sizes, and failures. Scoring 20 candidates and scoring 2,000 candidates are different workloads even with the same model. A median input and no external dependencies can make a benchmark unrealistically optimistic.` },
+        { title: 'Batching and resource utilization', body: `Batching can amortize overhead and use vectorized CPU or accelerator work efficiently. Dynamic batching groups requests that arrive close together, but waiting for a batch can increase latency. Throughput and per-request response time must be measured together.
+
+GPUs can help some neural workloads, while small tree models or tiny batches may run well on CPUs. Include transfers, model memory, concurrency, and startup overhead. More accelerator utilization does not by itself mean a better user deadline.
+
+Other options include a smaller model, cheaper features, a limited reranking set, quantization, compilation, or distillation. Validate numerical and quality effects and runtime compatibility. An optimization that changes the ranking may need product evaluation, not only a faster microbenchmark.` },
+        { title: 'Cache and degrade within the contract', body: `Caching compatible features, embeddings, or predictions can save work. Key by required version and context, honor invalidation and eligibility, and measure hit rates. A cache miss pattern under a traffic spike can differ dramatically from the average.
+
+Use deadline-aware limits: fewer candidates, a validated lighter model, or a non-personalized fallback if allowed. Preserve hard constraints. Set concurrency bounds so a slow dependency does not create unlimited waiting requests.
+
+Report cost per useful unit, such as requests meeting the quality and deadline target, not only raw requests per second. Include sustained peak tests, memory pressure, and rollback behavior. Performance engineering changes multiple parts of the system, not just model architecture.` }
+      ],
+      prompt: 'How would you investigate a slow prediction service and decide whether batching or GPU serving helps?',
+      answer: `“I would trace the complete path and benchmark realistic request sizes, concurrency, cold starts, and dependency behavior. Batching may improve throughput but adds waiting; a GPU only helps if the workload and overhead justify it. I would compare tail latency, quality, memory, and cost and keep a bounded, policy-safe fallback.”`,
+      pitfalls: ['Adding stage p95 values as if they equal request p95.', 'Assuming every ML model should serve on a GPU.', 'Claiming a throughput gain without measuring batching delay or quality.'],
+      checkpoint: { question: 'What should you measure when increasing dynamic batch waiting time?', options: ['Throughput and end-to-end latency together', 'Only GPU utilization', 'Only the number of stored model parameters'], correct: 0, explanations: ['Correct. More efficient batches can also increase request waiting time.', 'High utilization does not establish deadline compliance.', 'Parameter count does not capture queueing and serving overhead.'] }
+    },
   ],
   cases: [
   ]
