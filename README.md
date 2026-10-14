@@ -1,70 +1,103 @@
 # ML Study Lab
 
-A local, dependency-free study app generated from `ML_INTERVIEW_QNA.md`.
+ML Study Lab is a small, local study app for reviewing machine-learning fundamentals and practicing applied system design. It turns a Markdown question bank into short recall sessions and adds three guided courses with lessons, exercises, and hypothetical case studies.
 
-## Run locally
+The app has no account, build step, external service, or required package install. Your study data stays in your browser and, when the local server is running, in a private file on your computer.
 
-```powershell
+## Start studying
+
+### Requirements
+
+- Node.js 18 or newer
+- npm, which is included with Node.js
+
+### Run
+
+From the project folder, start the local server:
+
+```sh
 npm start
 ```
 
-Open [http://localhost:4173](http://localhost:4173).
+Then open [http://localhost:4173](http://localhost:4173). Stop the server with `Ctrl+C` in the terminal.
 
-No package installation or internet connection is required. Node.js 18 or newer is sufficient.
+No `npm install` step is needed. To use another port, set `PORT` before starting the server. For example, in PowerShell:
 
-## Learning features
+```powershell
+$env:PORT = '5000'
+npm start
+```
 
-- Active-recall sessions with hidden answers
-- Honest self-rating: Again, Got it, and Easy
-- Spaced-review scheduling and topic mastery
-- XP, levels, recall combos, daily goals, active-day history, and badges
-- Ten-question mixed challenges
-- Search and filters across all 444 questions
-- Mark questions done from the question screen or lists to record Easy recall and update mastery, XP, and review scheduling; click Done to undo completion
-- Topic-by-topic study trail in foundations-first order
-- Saved questions and personal notes
-- Keyboard shortcuts and reduced-motion support
-- Browser and server-side progress persistence across devices
-- JSON export/import and reset controls
-- Learning room: three module cards, each opening its own lesson path and three hypothetical worked cases
-- Search & Learning to Rank: 12 lessons; Recommendation Fundamentals: 10 lessons; ML in Production: 15 lessons
-- Explanation drafts, expandable worked answers, retryable checkpoints, and interactive ranking-metrics and content-based recommendation exercises
-- Course completion, checkpoint results, and drafts saved alongside existing progress, with separate course milestones
+Then visit `http://localhost:5000`.
 
-Open the module hub at [http://localhost:4173/#learn](http://localhost:4173/#learn). Open [Search](http://localhost:4173/#learn/search), [Recommendations](http://localhost:4173/#learn/recommendations), or [ML in Production](http://localhost:4173/#learn/production) directly. Each module retains its own completion, checkpoints, and last-opened lesson. Existing Search unit identifiers and old lesson links are preserved. Reading a unit does not change question-bank mastery or XP. Lesson completion can be toggled from its module list without opening it.
+## What you can do
 
-The worked cases cover building search end to end, improving tail queries with sparse labels, and investigating offline gains that regress online. All case designs and example numbers are hypothetical. Optional links to primary references are included, but the lessons themselves work without internet access.
+### Review the question bank
 
-The Recommendation module covers feedback and baselines, content-based and collaborative filtering, matrix factorization, implicit ALS and BPR, candidate generation and two towers, hybrid ranking, cold start, evaluation, and technical reasoning. Its cases cover an app discovery shelf, new-app cold start, and a tap-through improvement without better useful discovery. Advanced sequence models, bandits, page optimization, uplift, and evidence/messaging personalization remain future deep dives.
+The app includes **444 questions across 28 topics**. Start a quick practice session, choose a topic from the skill trail, search and filter the library, or save questions for later. In practice, try to answer before revealing the explanation, then rate your recall:
 
-The interface uses neutral learning language for everyday study. The original source-bank filename, storage key, and saved unit IDs remain unchanged for progress compatibility. Older playbook links redirect to the neutral `#learn/search/search-playbook` route.
+- **Again** schedules an earlier review.
+- **Got it** records a successful recall.
+- **Easy** records strong recall.
 
-ML in Production covers ingestion contracts, batch/stream processing, duplicates and replay, database roles, data modeling, offline/online features, reproducible training, serving patterns, capacity and latency, deployment, monitoring, recovery, privacy, and cost. It includes a storage comparison table, illustrative JSON/SQL, a pipeline-stage explorer, and a partition-aware capacity calculator. Worked cases cover app discovery, daily batch forecasts, and recovery from duplicate events and stale features. Examples do not provision infrastructure or execute the displayed code.
+Ratings update topic mastery and review timing. The app also tracks XP, daily activity, goals, challenge runs, and badges. Marking a question done in a list records an Easy recall; you can undo it.
 
-## Verification
+During a practice session, use `Space` to reveal an answer, `1` / `2` / `3` to rate it, `S` to save or unsave it, and `→` to move on.
 
-Run `npm test` for content, legacy progress compatibility, merge behavior, ranking-metric calculations, and question-bank regression checks. Optional isolated browser checks are in `tests/learning-browser.cjs`; they require Playwright and Microsoft Edge and intercept all progress requests in memory, leaving your real `progress.json` untouched. Set `PLAYWRIGHT_MODULE_DIR` to a package directory containing Playwright if it is not installed locally.
+### Follow a course
 
-## Keyboard shortcuts during practice
+Choose **Learning room** for three self-contained courses. Each has lessons in study order, checkpoints, a place to draft your explanation, and three hypothetical worked cases. Lessons can be marked read or unread; reading them does not change question-bank mastery or XP.
 
-| Key | Action |
+| Course | Lessons | Worked cases | Topics include |
+| --- | ---: | ---: | --- |
+| Search & Learning to Rank | 12 | 3 | Retrieval, ranking, relevance data, metrics, experimentation, and search design |
+| Recommendation Fundamentals | 10 | 3 | Feedback, content and collaborative methods, matrix factorization, candidate generation, evaluation, and cold start |
+| ML in Production | 15 | 3 | Data ingestion, processing, storage, features, training, serving, operations, privacy, and cost |
+
+The cases and example numbers are hypothetical. Some lessons link to optional primary-source reading; the course content itself works offline.
+
+## Your data
+
+The app saves progress in browser `localStorage`. While using the local server, it also saves progress to `progress.json` beside the app files. That file is excluded from Git. The app does not send data to a hosted service. Use **Export progress** to make a JSON backup, **Import progress** to restore one, or **Reset progress** to erase saved study data.
+
+By default, the server listens only on your computer at `127.0.0.1`. If you deliberately want to use it from another device on your local network, set `HOST=0.0.0.0` before starting it and open the server computer's network address on that device. For example, in PowerShell:
+
+```powershell
+$env:HOST = '0.0.0.0'
+npm start
+```
+
+LAN mode has no login or access control: anyone who can reach the server can read or overwrite its saved progress. Use it only on a trusted network, and do not expose it to the public internet.
+
+## Project layout
+
+| File | Purpose |
 | --- | --- |
-| `Space` | Reveal answer |
-| `1` | Rate Again |
-| `2` | Rate Got it |
-| `3` | Rate Easy |
-| `S` | Save or unsave the question |
-| `Right Arrow` | Skip to the next question |
+| `index.html` | App shell and page metadata |
+| `styles.css` | Layout, responsive styling, and accessibility states |
+| `app.js` | Question parsing, practice, courses, progress, and interactions |
+| `ML_INTERVIEW_QNA.md` | Source question bank loaded by the app |
+| `search-course.js` | Search lessons, cases, and references |
+| `recommendation-course.js` | Recommendation lessons, cases, and references |
+| `production-course.js` | Production lessons, cases, examples, and references |
+| `server.js` | Local web server and progress-file endpoint |
+| `tests/learning.test.cjs` | Fast content and learning-logic tests |
+| `tests/learning-browser.cjs` | Optional end-to-end browser checks |
+| `PRODUCT.md` | Product, audience, and accessibility principles |
 
-## Project files
+## Tests
 
-- `index.html`: semantic application shell
-- `styles.css`: responsive visual system
-- `app.js`: guide parser, learning engine, persistence, and interactions
-- `search-course.js`: self-contained course content and primary-source references
-- `recommendation-course.js`: recommendation lessons, cases, glossary, and primary-source references
-- `production-course.js`: production systems lessons, cases, examples, glossary, and primary-source references
-- `server.js`: minimal localhost server
-- `progress.json`: automatically created private study progress (ignored by Git)
-- `ML_INTERVIEW_QNA.md`: source question bank
-- `PRODUCT.md`: product and accessibility principles
+Run the dependency-free test suite with:
+
+```sh
+npm test
+```
+
+The optional browser suite runs with `npm run test:browser`. It requires Playwright and Microsoft Edge. The suite intercepts progress requests in memory and writes screenshots under the ignored `test-artifacts/` folder, so it does not touch your real `progress.json`. If Playwright is installed outside this project, set `PLAYWRIGHT_MODULE_DIR` to the directory containing its package before running the command.
+
+## Limitations
+
+- Progress is local to the browser and server you use; there are no accounts or hosted sync.
+- The LAN option is intended for a trusted home or office network, not public hosting.
+- The app is a learning aid, not a certification or a substitute for checking current primary sources.
+- The repository does not yet include a license. A license choice is needed before granting reuse rights for a public release.
