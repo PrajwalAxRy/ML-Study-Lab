@@ -106,6 +106,81 @@ When asked “Why content-based?”, connect it to cold-start items and availabl
       pitfalls: ['Saying content-based methods require no information about the user or context.', 'Calling an arbitrary similarity score a calibrated probability.', 'Assuming a new app’s metadata is complete and accurate.'],
       checkpoint: { question: 'Why can content-based filtering help with a new app?', options: ['It creates genuine interaction history from nothing', 'It guarantees that every user will like the app', 'It can represent the app from metadata before behavioral history exists'], correct: 2, explanations: ['Metadata can supply a representation, not real interactions.', 'Matching attributes do not guarantee preference or quality.', 'Correct. Item attributes can provide a scoring path before enough collaborative evidence is available.'] }
     },
+    {
+      id: 'rec-collaborative', phase: 'Learn the core methods', title: 'Collaborative filtering: users and item neighbors', minutes: 8,
+      subtitle: 'Learn from shared patterns rather than just matching descriptions.', bridge: [7, 13, 18], sources: ['collaborative'],
+      blocks: [
+        { title: 'The user–item interaction matrix', body: `Rows are users or appropriate anonymous entities, columns are apps, and cells contain defined feedback. The matrix is usually sparse: most people interact with a tiny part of the catalog. Collaborative filtering uses patterns across this matrix to find useful relationships.
+
+In user-based neighborhood methods, find people with similar feedback and score apps they liked that the target user has not already consumed, subject to eligibility. In item-based methods, find apps with similar interaction audiences and recommend neighbors of a user's seed items.
+
+The associations need not be obvious in metadata. Users of trail-navigation apps may also prefer weather tools. Shared users provide complementary evidence to descriptions. This is correlation under the observed policy, not proof that one app causes interest in another.` },
+        { title: 'Calculate a tiny item similarity', body: `Suppose app A has interacted users {1,2,3} and app B has {2,3,4}. Jaccard overlap is **2/4 = 0.5**. App C has users {1,2}, so A–C overlap is **2/3 ≈ 0.667**. These scores reflect observed overlap, not intrinsic similarity.
+
+Cosine similarity is another choice for binary or weighted interaction vectors. With explicit ratings, centered measures may help remove users' different rating scales. Sparse overlap can make estimates noisy, so require adequate support or use shrinkage where justified.
+
+Popular apps naturally overlap with many audiences. Normalize and inspect popularity effects rather than let raw co-occurrence counts decide everything. Precomputing top item neighbors can make “similar apps” retrieval inexpensive, but updates must reflect current inventory and feedback.` },
+        { title: 'Choose the method for the problem', body: `Item neighborhoods are an interpretable baseline for related-app recommendations. User neighborhoods may become expensive or unstable with enormous user populations and short histories. Both depend on sufficient reliable overlap and can inherit old exposure patterns.
+
+New apps with no interactions have no informative collaborative neighbors. New users with no history have no reliable collaborative profile. Content and contextual methods remain valuable for those cases. Rare tastes and sparse locales also need slice-level evaluation.
+
+Collaborative filtering is a family, not a synonym for matrix factorization. Neighborhood methods use observed relationships directly; factorization methods learn compressed representations from them. In a technical review, make that distinction before discussing scalability.` }
+      ],
+      prompt: 'Compare content-based, user-based collaborative, and item-based collaborative recommendations for apps.',
+      answer: `“Content-based methods match item attributes to interests. User-based collaborative filtering borrows evidence from similar users; item-based filtering uses shared interaction audiences to find neighbors. Collaborative signals can reveal useful cross-category relationships, but sparse overlap, exposure bias, and cold start limit them. I would benchmark an item-neighbor baseline and retain a content or contextual fallback.”`,
+      pitfalls: ['Equating collaborative filtering only with matrix factorization.', 'Using raw shared-user counts without considering item popularity.', 'Interpreting co-interaction as a causal relationship.'],
+      checkpoint: { question: 'Two apps have very different descriptions but share a strong interaction audience. Which method most directly uses that relationship?', options: ['Item-based collaborative filtering', 'Exact title matching alone', 'Ignoring all other users’ interactions'], correct: 0, explanations: ['Correct. It uses cross-user co-interaction evidence rather than requiring metadata similarity.', 'Title matching would not capture that audience relationship.', 'Collaborative evidence specifically relies on patterns beyond one user.'] }
+    },
+    {
+      id: 'rec-factorization', phase: 'Learn the core methods', title: 'Matrix factorization, implicit ALS, and BPR', minutes: 10,
+      subtitle: 'Connect linear algebra, optimization, and ranking to recommendations.', bridge: [18, 19, 21], sources: ['factorization', 'implicitPaper', 'als', 'bpr'],
+      blocks: [
+        { title: 'Compress interaction patterns into latent vectors', body: `Factorization assigns each user a vector u and app a vector v, often predicting affinity with **s(u,i) = u · vi** plus optional biases. The vectors summarize interaction patterns. A latent dimension is not necessarily a readable concept like “outdoors”; equivalent transformed factors can represent similar predictions.
+
+For explicit ratings, a common objective fits observed ratings with squared error plus regularization. Missing ratings are not automatically zero-rated preferences. Regularization controls overfitting, especially when a user or item has few observations.
+
+The dot product can support cheap candidate retrieval. Learned ID vectors need history for the corresponding IDs; metadata-free factorization does not inherently encode an unseen app. This explains why hybrid representations are useful.` },
+        { title: 'Implicit weighted factorization and ALS', body: `An implicit formulation separates a binary preference indicator from confidence. A common teaching convention uses **pui = 1 if an interaction exists, otherwise 0**, with **cui = 1 + α×interactionStrength**. The objective is **Σ cui(pui − u·vi)^2 + regularization**.
+
+Here a zero for missing interaction is a modeling proxy with lower confidence, not a verified dislike. Repeated activity increases confidence under this convention, not necessarily the preference target. The meaning and transform of interaction strength must be chosen for the event type.
+
+**Alternating least squares (ALS)** fixes item factors while solving user factors, then fixes user factors while solving item factors. Each conditional subproblem is more tractable, but the joint problem is not generally convex and global optimality is not guaranteed. Weighted implicit ALS should not be confused with ordinary unweighted factorization of a table full of negative labels.` },
+        { title: 'BPR: optimize sampled within-user preferences', body: `Bayesian Personalized Ranking (BPR) uses user–positive–negative triples. It encourages the score of an interacted item i to exceed a sampled unobserved item j with a loss such as **−log sigmoid(sui − suj)** plus regularization.
+
+This preference is a training assumption, not proof that every unobserved item is disliked. Sampling affects the task: easy random negatives can give little discrimination, while hard negatives can include genuinely useful apps. Inspect false negatives and the serving candidate distribution.
+
+ALS and BPR differ in their objectives and optimization, not simply in “old versus new”. Compare ranking quality, efficiency, confidence modeling, and supported cold-start paths. Be ready to explain the dot product, the loss, and the assumptions before discussing specialized implementations.` }
+      ],
+      prompt: 'Explain matrix factorization, then compare weighted implicit ALS with BPR.',
+      answer: `“Factorization learns user and item vectors whose dot product summarizes affinity. Weighted implicit ALS fits binary preference proxies with confidence weights while alternating factor updates. BPR learns sampled within-user orderings between observed and unobserved items. Both depend on feedback and sampling assumptions, so I would compare top-K quality and serving cost and provide metadata-based cold-start handling.”`,
+      pitfalls: ['Treating missing feedback as a certain dislike.', 'Claiming ALS guarantees a global optimum.', 'Assuming latent dimensions have fixed semantic names or that ID factors represent unseen apps.'],
+      checkpoint: { question: 'In common weighted implicit factorization, what does repeated interaction primarily increase?', options: ['The number of app IDs', 'Confidence in the modeled preference signal', 'Proof of causal incremental value'], correct: 1, explanations: ['Repeated interaction does not create new IDs.', 'Correct. In the stated convention, preference is a binary proxy and interaction strength affects its confidence weight.', 'Observational frequency is not evidence of a causal treatment effect.'] }
+    },
+    {
+      id: 'rec-candidates', phase: 'Design the system', title: 'Candidate generation, two towers, and negative sampling', minutes: 8,
+      subtitle: 'Find plausible recommendations efficiently before expensive scoring.', bridge: [20, 21, 24, 25], sources: ['sampling'],
+      blocks: [
+        { title: 'Use complementary candidate sources', body: `A homepage can retrieve from user–item factorization, neighbors of recently engaged apps, content matching, contextual popularity, and curated inventory. Each source may catch useful items the others miss. Union by stable item ID and preserve source evidence for later ranking.
+
+Deduplicate and respect eligibility. At a fixed candidate cap, adding a source can displace other useful candidates, so measure source contribution and overlap rather than celebrate a larger raw list. A source score is not automatically comparable with another source's score.
+
+For related-app recommendations, the seed app supplies context. For a homepage, the representation may come from user interests and permitted request context. In recommender terminology “query” can mean this retrieval context, not necessarily typed text.` },
+        { title: 'Two-tower recommendations', body: `A user/context tower encodes permitted history and context; an item tower encodes app attributes and optional learned IDs. Similarity encourages useful user–item matches. Precomputed item vectors allow efficient nearest-neighbor retrieval, with a compatible user encoder at request time.
+
+Unlike metadata-free ID factorization, feature-based towers can offer representation paths for previously unseen feature combinations. This does not guarantee strong cold-start recommendations: sparse or misleading content and absent user preferences still matter.
+
+Train with reliable positives and sampled comparisons. In-batch negatives are convenient, but frequent items appear disproportionately and some comparison items may also be good recommendations. Random, hard, and in-batch negatives have different trade-offs; choose and audit a distribution aligned with the intended task.` },
+        { title: 'Evaluate the retrieval stage separately', body: `Measure how many future or judged useful items appear in the candidate pool under a stated reference set. Also measure eligible candidate counts, latency, index freshness, and new-app coverage. Candidate recall against historical outcomes is affected by the old exposure policy.
+
+Distinguish the quality of learned representations from ANN approximation quality. An accurate approximate index can faithfully retrieve unhelpful neighbors if the embeddings do not represent the product need.
+
+For a technical review, explain when to precompute, when to update, what happens when sources time out, and how feature and index versions stay compatible. Your Search module goes deeper on ANN and contrastive mechanics; this lesson focuses on recommender-specific inputs and sampling.` }
+      ],
+      prompt: 'Design candidate generation for a personalized app homepage. Explain two-tower inputs and one negative-sampling risk.',
+      answer: `“I would combine collaborative, content, related-item, and contextual baseline sources, then deduplicate eligible candidates within a tuned budget. A feature-based user/context tower and app tower could supply semantic retrieval using precomputed app vectors. I would audit false negatives and item-frequency bias, then evaluate candidate recall, cold-start coverage, freshness, and latency independently of final ranking.”`,
+      pitfalls: ['Assuming a retrieval query must be a typed search string.', 'Ignoring frequency bias and false negatives in in-batch training.', 'Claiming new features eliminate cold start automatically.'],
+      checkpoint: { question: 'What can be used as the query representation for homepage recommendation retrieval?', options: ['Only the exact name of an app', 'Only a text string entered into a search bar', 'A permitted user/history/context representation'], correct: 2, explanations: ['That may describe a seed-based surface, but it is not the only retrieval context.', 'A homepage need not have typed text.', 'Correct. In retrieval, “query” can refer to the current user or context vector.'] }
+    },
   ],
   cases: [
   ]
