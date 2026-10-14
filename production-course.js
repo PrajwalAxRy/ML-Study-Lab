@@ -450,5 +450,113 @@ Only then replace a file boundary with a broker or add streaming and distributed
     }
   ],
   cases: [
+    {
+      id: 'prod-case-discovery', title: 'Build an app-discovery system from ingestion to response', minutes: 12,
+      subtitle: 'A worked architecture with explicit storage roles and failure paths.', bridge: [25, 26], sources: [],
+      scenario: 'Design a hypothetical recommendation service with a changing app catalog and permitted interaction events. Catalog eligibility must be respected, recent features need bounded freshness, and responses have a product-defined latency deadline. This is an illustrative design, not any company’s internal stack.',
+      blocks: [
+        { title: '1. Establish contracts and truth', body: `Clarify request peaks, event rates and size, acceptable feature age, the response deadline, privacy choices, and useful outcomes. Define whether suggestions include installed apps. Separate mandatory eligibility from optional personalization.
+
+Use transactional catalog records as authoritative truth. Define stable app IDs, metadata schema, availability updates, and a history or change mechanism. For events, define IDs, timestamps, version, exposure meaning, and attribution. A download label depends on when and how the outcome is observed.
+
+This design may use PostgreSQL, an event log, object storage, and a keyed online store, but equivalent components can fit. Name the workload behind each choice instead of presenting brands as an obligatory architecture.` },
+        { title: '2. Capture and publish validated history', body: `Send application events through an authenticated collector with required-field validation. Preserve event IDs on retries and acknowledge under a defined durable boundary. A log supplies buffering and replay when required; choose partition keys for state ownership and balanced work.
+
+Track catalog changes with CDC or a scheduled export appropriate to freshness. Handle initial snapshots and changes without losing the boundary between them. Do not let a database commit and an unrelated event publish silently disagree; a suitable transactional outbox or CDC approach may support that contract.
+
+Consumers validate, deduplicate, and quarantine failures. Publish historical data into documented analytical tables or partitioned objects. Retain raw records only under policy, and monitor source completeness, lag age, and rejections. Regularize small-file publication if object layout becomes an analytical bottleneck.` },
+        { title: '3. Build features and train reproducibly', body: `Compute historical interests and app features from time-safe inputs. Distinguish event time from availability, mature future outcomes separately, and version preprocessing and dataset snapshots. Compare contextual and simple recommendation baselines before adding expensive architectures.
+
+Materialize compatible online values keyed by allowed entity or context. Define per-feature freshness and guarded updates so older backfills cannot replace current state. Keep a contextual path for sparse or opted-out users.
+
+Evaluate retrieval coverage and ranking quality as well as new-item and locale slices. Register a compatible model package with immutable provenance. If embeddings change, publish matching item indexes before routing the associated user encoder.` },
+        { title: '4. Serve within the whole-request deadline', body: `Validate context, retrieve a bounded set of candidates, fetch compatible keyed features, rank with a loaded artifact, apply hard eligibility, and return outputs. Trace stage timings and safe version metadata. Do not join months of event history in this request path.
+
+Set deadlines and concurrency limits for dependencies. If optional personalization fails, use a validated lighter or contextual path while preserving mandatory availability checks. An eligibility failure may need a different response from a missing affinity feature.
+
+Cache only with suitable version, context, and invalidation. Monitor end-to-end tail latency and fallback rates under cold caches and peak traffic. An inference benchmark alone cannot prove that the request path meets its deadline.` },
+        { title: '5. Roll out, scale, and recover', body: `Use compatibility tests and shadow traffic for operational comparison, then an appropriate canary and planned product experiment. Define stop criteria and a rollback of the model plus compatible features/index, not just a filename change.
+
+Measure consumer lag age, partition skew, sink throughput, online-store hot keys, and serving concurrency. Scale the constrained stage; more API replicas do not fix a feature processor behind on events. Budget backfill load separately.
+
+Test broker/processor replay and storage restoration within retention and recovery objectives. After repair, verify feature completeness and correctness, not only that the queue drained. The release is successful only when data, model behavior, and useful product outcomes satisfy their contracts.` }
+      ],
+      prompt: 'Explain the architecture end to end. Justify one storage choice, one ingestion guarantee, one serving fallback, and one scaling signal.',
+      answer: `“I would separate transactional catalog truth, durable event flow, analytical history, and keyed serving features according to their workloads. Ingestion would use stable IDs, validated contracts, and retry-safe effects with a replay plan. Training would use point-in-time data and compatible artifact/index versions. A bounded request path would retrieve and rank candidates, preserve hard eligibility, and fall back appropriately. I would scale from stage-level load and freshness metrics and validate rollout and recovery end to end.”`,
+      pitfalls: ['Listing database products without mapping access patterns.', 'Treating optional personalization failure like a mandatory eligibility failure.', 'Scaling API workers while ignoring upstream feature freshness.'],
+      checkpoint: { question: 'Feature values are hours behind while API CPU is low. Which action should come first?', options: ['Investigate ingestion/processing lag, skew, sink throughput, and freshness contracts', 'Only add API replicas', 'Immediately train a larger ranker'], correct: 0, explanations: ['Correct. The bottleneck may be upstream of inference; investigate the stage responsible.', 'More API capacity does not produce current feature values.', 'Retraining cannot repair delayed or missing source processing.'] }
+    },
+    {
+      id: 'prod-case-batch-forecast', title: 'Build daily forecasts without unnecessary streaming', minutes: 10,
+      subtitle: 'A simpler production design with transactional truth and analytical computation.', bridge: [2, 25, 27], sources: [],
+      scenario: 'A hypothetical business needs next-day forecasts for thousands of items each morning. Inputs come from transactional records and historical events. There is no per-user live prediction deadline, but completeness and delivery time matter.',
+      blocks: [
+        { title: '1. Define freshness and the operational outcome', body: `Ask the forecast horizon, entity keys, required publication time, missing-output behavior, and evaluation metric. Establish which source corrections can arrive late and whether the forecast should incorporate them before the cutover.
+
+The product needs reliable scheduled outputs, not necessarily an always-on inference API. Batch prediction can satisfy the stated contract and make serving a keyed result lookup. Specify validity date, model version, and output completeness.
+
+Choose an analytical read path that does not overload the transactional application. At small volume, a bounded export may suffice; larger joins can justify a warehouse or object-backed tables. Do not pick streaming because ML systems are assumed to require it.` },
+        { title: '2. Ingest and prepare historical data', body: `Export records with stable keys, time definitions, and a reproducible boundary or snapshot. Capture committed updates and corrections consistently. Validate coverage, duplicates, rejected rows, and required categories before training or prediction.
+
+Use partitioned historical tables or appropriate files for large scans. Keep input snapshots and documented transforms. A daily DAG can check sources, compute features, validate them, produce predictions, and publish the complete result set.
+
+Fit historical evaluations using only what would have been available at each forecast time. Future corrections can leak information just as future behavior can in a recommender. Data completeness and point-in-time correctness need explicit treatment.` },
+        { title: '3. Train and publish a compatible forecast package', body: `Compare a simple seasonal or historical baseline with the proposed model. Use suitable time-based validation and entity slices. Version feature logic, preprocessing, source data, parameters, and artifact provenance.
+
+Prediction can use a loaded package across the batch instead of loading for every item. Check empty histories, missing features, unsupported items, numerical ranges, and resource limits. Validate the number and identities of expected outputs before promotion.
+
+Write to a new version or staging area, then publish under an atomic or otherwise well-defined complete-output contract. Readers should not see half of tomorrow's forecasts combined unpredictably with yesterday's results.` },
+        { title: '4. Retry, backfill, and serve results safely', body: `Use run identity and target date so retries replace or merge the same logical outputs without duplication. Historical backfills go to controlled versions and should not overwrite the currently published date accidentally.
+
+Serve forecasts from a keyed result table or suitable storage/API based on access needs. The response includes entity, forecast horizon/date, artifact version, and validity information. A warehouse is useful for generating the data but not automatically the best place for every small application lookup.
+
+If a run fails, use a declared policy: last-valid output where meaningful, a conservative baseline, or a visible unavailability state. Forecasts can expire; a stale result must not silently masquerade as the current one.` },
+        { title: '5. Operate to the deadline and budget', body: `Monitor source arrival, validation, task duration, retries, dataset completeness, output quality, and publication by deadline. A successful final task with missing entities is still an incomplete product delivery.
+
+Scale the slow stage using query plans, partition pruning, parallelism, or efficient model batching. Bound concurrent retries and backfills so they do not compete uncontrolled with tomorrow's deadline. Track cost of scans and data movement as well as computation.
+
+This design shows that production maturity means matching contracts, recovery, and observability to the workload. It does not require Kafka, GPUs, Kubernetes, or a separate feature store if simpler components meet the measured need.` }
+      ],
+      prompt: 'Design the daily forecasting path and explain why you would or would not use streaming and a live model API.',
+      answer: `“I would define the daily publication and validity contract, ingest reproducible bounded source data, compute past-only features, and run a validated versioned batch package. I would publish complete keyed outputs, make retries and backfills safe, and monitor entity completeness and deadline delivery. Streaming or a synchronous API would be added only if a real freshness or access requirement justified them.”`,
+      pitfalls: ['Equating production quality with the number of distributed services.', 'Publishing partially written daily results.', 'Serving expired outputs without indicating their age and validity.'],
+      checkpoint: { question: 'What best prevents readers from seeing a half-written daily forecast?', options: ['Adding a broker regardless of the workload', 'Staging and validating a complete output version before controlled publication', 'Loading a model separately for each item'], correct: 1, explanations: ['A broker alone does not establish the publication contract.', 'Correct. Publication should expose a validated complete logical result.', 'Repeated model loading does not solve output consistency.'] }
+    },
+    {
+      id: 'prod-case-incident', title: 'Recover from duplicate events and stale online features', minutes: 12,
+      subtitle: 'Diagnose an upstream incident before blaming the model.', bridge: [2, 17, 25], sources: [],
+      scenario: 'After an event consumer restarts, some activity counters jump and other users’ features become stale. Recommendation quality declines, but the model artifact has not changed. A large backfill is also running. All events and conditions in this exercise are hypothetical.',
+      blocks: [
+        { title: '1. Verify impact and establish a safe response', body: `Confirm telemetry, affected times, versions, locales or entities, and feature contracts. Compare outcome evidence with its observation delay and uncertainty. Infrastructure availability does not prove the features are correct.
+
+Use a documented, risk-appropriate fallback if feature quality or freshness breaches a serving contract. Preserve hard constraints and safe diagnostic metadata. Do not blindly roll back model weights if the corrupted feature values would still be supplied to those weights.
+
+Establish who owns the collector, consumer, sink, and online materialization, and coordinate changes under the runbook. Diagnosis should identify the failure boundary, not trigger simultaneous untracked changes everywhere.` },
+        { title: '2. Explain the counter jump', body: `Inspect how progress was committed relative to sink effects. If a consumer incremented a counter and crashed before acknowledging the event, replay could increment it again. Stable IDs help only if deduplication and the effect have an adequate atomic relationship.
+
+Check whether the retry generated new event IDs, whether the dedupe window expired, and whether duplicate records came from another source. Distinguish legitimate late arrivals from repeated logical events.
+
+A unique event table can supply a canonical record layer, but a separate aggregate table may still have incorrect replay semantics. Test the exact read–write–commit failure sequence and document which guarantees held and which did not.` },
+        { title: '3. Explain the stale values', body: `Measure lag and lag age by partition, key skew, consumer rebalances, sink latency, and worker utilization. A hot partition can remain behind while other consumers are idle. More workers than useful conventional consumer-group partitions may not help.
+
+The backfill may be saturating the same database, connections, or online-write path. It might also publish historical values without checking their version or time, replacing newer values.
+
+Localize the responsible dependency or update ordering. Bound or separate competing batch load and protect current state from stale writes. Do not assume that a low CPU chart proves the consumer has spare throughput.` },
+        { title: '4. Repair and rebuild under a controlled version', body: `Fix the retry/commit and online-update contracts, then validate them with failure injection in a suitable test environment. Reconstruct canonical events or correct aggregates from retained, permitted history rather than manually guessing counter adjustments.
+
+Use a new feature version or staging namespace when rebuilding. Check duplicates, values, missingness, time coverage, and agreement with expected examples before promotion. Keep original availability semantics for historical training reconstruction where required.
+
+Plan replay rate and sink headroom. Replaying as fast as possible can prolong the incident by overwhelming shared dependencies. Respect retention and deletion rules; if evidence is no longer retained, state the limits of recovery rather than invent missing records.` },
+        { title: '5. Verify recovery and prevent recurrence', body: `Confirm feature correctness and freshness, not merely a drained queue. Restore the serving path under the runbook and monitor quality and fallback rates by affected slice. Keep versioned provenance to connect predictions to corrected inputs.
+
+Add alerts for duplicate effects, source completeness, partition lag age, rejected updates, and online value age. Include backfill isolation and guarded materialization in routine pipeline tests.
+
+Record root causes and contributing factors separately. The model staying unchanged helps narrow the investigation but does not prove it has no sensitivity to the shifted data. Retraining is a later decision after the pipeline is repaired and trustworthy outcomes are available.` }
+      ],
+      prompt: 'Give a diagnosis and recovery sequence for counter inflation plus stale features. Explain why a model-only rollback may not solve it.',
+      answer: `“I would verify and localize impact, apply a contract-safe fallback, and inspect replay/commit semantics, IDs, sink effects, partition skew, and backfill contention. I would prevent stale online updates, reconstruct validated canonical features in a controlled version, and rate-limit recovery. A model-only rollback may still consume corrupted features. Recovery must prove correctness, freshness, and product stability, not just a drained queue.”`,
+      pitfalls: ['Calling stable IDs sufficient without checking atomic effect application.', 'Overwriting online features directly with an unchecked backfill.', 'Retraining or rolling back weights instead of repairing corrupted inputs.'],
+      checkpoint: { question: 'Why can a model-only rollback fail during this incident?', options: ['Because models cannot be rolled back', 'Because counters never affect predictions', 'Because the older model may still consume the same corrupted or stale features'], correct: 2, explanations: ['Model rollback can be useful when the compatible package and cause justify it.', 'Feature values can materially affect predictions.', 'Correct. Repair or route around the invalid input state and verify compatible serving behavior.'] }
+    }
   ]
 };
