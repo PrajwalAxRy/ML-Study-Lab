@@ -351,5 +351,137 @@ You should also be able to say “I do not know the internal implementation, but
     }
   ],
   cases: [
+    {
+      id: 'case-design-search', title: 'Design an App Store-style search system', minutes: 12,
+      subtitle: 'A complete design walkthrough, from an ambiguous prompt to a testable architecture.', bridge: [25, 26], sources: [],
+      scenario: 'You are asked to improve organic search for a large app catalog. Exact-title searches generally work, but users struggle with descriptive queries such as “offline maps for hiking”. Design a solution and explain how you would measure success.',
+      blocks: [
+        { title: '1. Clarify the problem and state assumptions', body: `Ask whether we are ranking apps only or also stories and in-app events; whether ads are out of scope; which languages and regions matter; and what data and latency constraints apply.
+
+For this walkthrough, assume organic app results, region and device eligibility, a large catalog, and permitted query/impression/conversion logs. Assume the main failure is exploratory discovery, not exact-title matching. All architecture choices and numbers in this case are illustrative, not Apple's internal design.
+
+Define success as useful app discovery rather than clicks alone. Choose a primary experimental outcome such as successful search sessions with an attributed download, while validating that it is an acceptable proxy for the actual product goal. Guard exact-title quality, empty results, and p95 response time.` },
+        { title: '2. Localize the failure before designing', body: `Create a judged sample of exact-title and exploratory queries across languages and frequency buckets. For each missed relevant app, determine whether it was eligible, indexed, retrieved, and poorly ranked.
+
+Suppose the desired hiking app is present in the catalog but absent from lexical candidates because its metadata uses “trail navigation” rather than “hiking maps”. This suggests a vocabulary-mismatch retrieval problem. If it is already retrieved at position 80, a ranking intervention may be more direct.
+
+This diagnostic prevents spending weeks on a powerful ranker when candidate coverage is the actual bottleneck. It also gives you a concrete hypothesis: semantic retrieval should recover useful paraphrase matches.` },
+        { title: '3. Build the minimum viable pipeline', body: `Start with language-aware lexical retrieval over app metadata. Preserve title matching. Add a semantic retriever trained or adapted to query–app relevance. Union eligible candidates by app ID and maintain source scores and source-presence features.
+
+For illustration, retrieve a few hundred candidates from each branch within an agreed latency budget, then tune the combined candidate cap. Do not present those counts as requirements. Track the incremental relevant apps contributed by the semantic source, not just the larger total candidate count.
+
+Use RRF as an initial fusion baseline. A downstream ranker can consume lexical and semantic similarity, exact-title match, category evidence, metadata quality, and time-safe behavior-derived features. Apply final eligibility rules and justified deduplication. Avoid broad diversification that pushes away the specific app a navigational query requests.` },
+        { title: '4. Define training examples and choose the ranker', body: `Group candidate examples by request. Use expert graded relevance judgments for semantic fit and carefully attributed, mature behavioral labels for actual outcomes. Keep exposed non-interactions distinct from unexposed apps; audit negative sampling.
+
+A query-grouped boosted-tree ranker with a ranking-aware objective is a defensible first upgrade over heuristics. It can combine heterogeneous matching features without demanding joint text encoding for every candidate. If fine-grained semantics remain a bottleneck, compare a limited cross-encoder reranker using identical candidates and judgments.
+
+Build features as of the request time. Add metadata-based behavior for new apps and contextual behavior for users without permitted history. Compare gains from retrieval, labels, features, and model complexity with ablations.` },
+        { title: '5. Evaluate the stages and the full product', body: `For retrieval, measure relevant-item Recall@candidateCap against the defined judged pool, plus latency and eligibility coverage. For ranking, measure NDCG@K on graded labels and MRR for exact-title success. Slice by intent, language, query frequency, and app age.
+
+Compare a fixed-candidate ranker benchmark with an end-to-end pipeline benchmark. Use time-safe held-out traffic and confidence intervals with the appropriate cluster unit. Do not tune repeatedly on the final test set.
+
+Run a predefined A/B test with a stable assignment unit, mature outcome window, quality guardrails, and checks for telemetry and sample-ratio mismatch. Offline improvements justify exposure to a controlled test; they are not proof of improved discovery.` },
+        { title: '6. Cover serving, risk, and fallback', body: `Account for query encoding, two candidate branches, feature lookups, and ranking within the request deadline. Cache only when the key respects locale, eligibility, and any allowed personalization. Keep models and indexes compatible, and update app metadata and availability promptly.
+
+If the semantic branch times out, serve a validated lexical path rather than block the whole request. Monitor whether fallback disproportionately affects a language or query type. Roll out with operational checks and a clear rollback plan.
+
+Privacy limits which signals can be collected or used. Do not silently introduce personal-history logging. A useful contextual baseline remains necessary. Present these as constraints to clarify, not assumptions about Apple's private infrastructure.` },
+        { title: 'Follow-up questions and strong responses', body: `**“Why not use only vector search?”** Exact names and rare terms can need lexical precision. I would compare complementary sources by intent before discarding either.
+
+**“How will you handle a new app?”** Index its metadata immediately, use content-based similarities and non-history features, and evaluate new-app coverage separately. No interaction history is not evidence of irrelevance.
+
+**“What if the cross-encoder adds too much latency?”** Limit its candidate count, compare a cheaper ranker or distilled model, and test whether its marginal quality gain survives the serving constraint.
+
+**“What would you implement first?”** A stage-by-stage error audit and an evaluation set, followed by a lexical baseline and the smallest change targeted at the observed failure.` }
+      ],
+      prompt: 'Give your own five-minute design answer before opening the sample summary. Name a baseline, a retrieval metric, a ranking metric, and an online guardrail.',
+      answer: `“I would focus on exploratory-query misses while protecting exact-title searches. After auditing where relevant apps are lost, I would test a lexical-plus-semantic candidate pipeline and a query-grouped ranker with time-safe matching and metadata features. I would separate semantic judgments from behavioral targets, evaluate candidate recall and top-K quality by intent and locale, and run a planned A/B test on search success with latency and quality guardrails. I would add a richer reranker only if measured errors and serving costs justify it, with privacy-aware features and a safe lexical fallback.”`,
+      pitfalls: ['Skipping failure localization.', 'Optimizing downloads without defining attribution and quality.', 'Assuming every candidate or user has rich history.'],
+      checkpoint: { question: 'Exploratory-query misses improve, but exact-title MRR falls sharply. What is the best conclusion?', options: ['Ship because average NDCG rose', 'Increase semantic model size immediately', 'The aggregate gain hides an important intent-specific regression; inspect and protect navigational matching'], correct: 2, explanations: ['Average quality does not erase a critical navigational failure.', 'A larger model is not a targeted explanation or fix.', 'Correct. Validate the regression, localize its cause, and revise candidate fusion or intent-sensitive ranking before declaring the change successful.'] }
+    },
+    {
+      id: 'case-tail-queries', title: 'Improve tail queries when labels are scarce', minutes: 11,
+      subtitle: 'Reason about semantic relevance, cold-start apps, and LLM-assisted labels.', bridge: [9, 10, 21, 24], sources: ['apple'],
+      scenario: 'Search performs well for popular app names but poorly for rare descriptive queries and recently launched apps. The team has many interaction logs but few expert query–app relevance judgments. What would you change?',
+      blocks: [
+        { title: '1. Separate three possible problems', body: `Low-frequency queries have little direct feedback. New apps have little behavior history. Descriptive queries may have vocabulary mismatch. These are related but distinct problems.
+
+First compare candidate coverage and ranking quality for each slice. An app missing from all candidates needs retrieval or indexing work; a retrieved app systematically penalized for low downloads needs feature or objective review. Poor query interpretation needs a different intervention again.
+
+Use a held-out judged set spanning head and tail queries, new and mature apps, and relevant languages. Define an operational tail threshold for analysis, but do not treat a chosen traffic cutoff as a universal industry definition.` },
+        { title: '2. Add evidence that generalizes beyond popularity', body: `Leverage app descriptions, titles, categories, and query semantics. Content representations can score a new app without waiting for downloads. A query–app relevance model can generalize across similar requests rather than memorizing a raw query ID.
+
+Audit behavior-derived features. Unsmoothed conversion rates from one or two impressions are unstable; zero interactions may mean zero exposure. Missing-history indicators and supported smoothing are preferable to blindly assigning poor quality.
+
+If retrieval lacks semantic candidates, test a complementary retriever. If ranking already has the candidates, test text relevance features or labels there first. More candidate sources and a more powerful ranker should be separate ablations.` },
+        { title: '3. Use an LLM as a labeling assistant, not an oracle', body: `Write a relevance rubric. For “offline hiking maps”, require actual evidence of offline map functionality and suitability for hiking, not just outdoor-related words. Give the labeling system sufficient app metadata and allow uncertainty when support is missing.
+
+Create an expert-labeled development subset to assess agreement and systematic mistakes. Check language, app popularity, metadata length, and unsupported capability claims. Compare simpler text models or human-only labels as baselines. A large model is not inherently more accurate for this task.
+
+Generate proposed labels for selected query–app candidates, then audit uncertain and high-impact cases. Record labeling-model and rubric versions. Keep the independent expert evaluation set separate from synthetic training labels to avoid circular validation.` },
+        { title: '4. Train and isolate the source of improvement', body: `Keep a baseline using existing behavioral evidence. Add semantic features, expert labels, and generated labels in staged experiments. If objectives are combined, define whether you are optimizing multiple targets or using new judgments to improve representations; do not casually mix label scales.
+
+For hard negatives, choose plausible but unsuitable apps. A generic travel guide may mention hiking yet offer no offline maps. Check that the negative truly fails the rubric rather than merely lacks exposure.
+
+Ablate the new labels while holding the architecture fixed. Then compare architecture changes with the same labels. This supports a credible answer to “Did the model improve because of the LLM, the data, or the ranker?”` },
+        { title: '5. Evaluate more than the target slice', body: `Measure tail-query candidate recall and NDCG on expert judgments, as well as new-app coverage and exact-title MRR. Inspect whether the change invents semantic matches for apps with vague marketing descriptions.
+
+Use a time-based test so new-app features reflect only what was known then. Report both equal-query and traffic-weighted views if they address different questions. A tail improvement can be diluted in an overall traffic metric; conversely, a weighted overall gain can conceal tail harm.
+
+Run an online experiment with the predefined outcome and guardrails. Keep enough statistical power for the slice you intend to claim. A promising subgroup point estimate is not automatically a reliable subgroup effect.` },
+        { title: 'What this case teaches', body: `The important reasoning chain is **sparse feedback → missing semantic evidence → validated labels or representations → isolated offline tests → online validation**. Do not jump from “rare queries” to “use the biggest LLM”.
+
+Apple's public search research is a real example of combining textual judgments and behavioral relevance, including attention to tail-query performance. The proposal above is a hypothetical exercise inspired by that problem class, not a reproduction of Apple's implementation.
+
+If asked what could fail, mention hallucinated app capabilities, biased judgments, synthetic-label evaluation leakage, noisy low-support behavioral features, and unchanged candidate coverage.` }
+      ],
+      prompt: 'Explain your plan for tail queries in three minutes. Include how you would validate generated labels and isolate their effect.',
+      answer: `“I would first separate missing candidates from poor ordering and distinguish rare queries from new-item cold start. I would add content-based evidence and audit popularity-derived features. If expert labels are scarce, I would test LLM-assisted judgments against an independent expert rubric, audit errors and uncertainty, and retain an expert-only evaluation set. I would ablate labels, features, and architecture separately, then validate tail-query relevance and online outcomes while protecting exact-title quality and serving latency.”`,
+      pitfalls: ['Calling synthetic judgments ground truth.', 'Evaluating generated training labels against labels from the same generator.', 'Expecting better labels to rank an app that is never retrieved.'],
+      checkpoint: { question: 'Which evaluation best tests whether generated relevance labels improve the actual task?', options: ['An independent expert-judged held-out set plus an appropriately designed online experiment', 'Agreement with the same LLM that generated the training labels', 'Training loss alone'], correct: 0, explanations: ['Correct. Independent judgments and online validation reduce circularity and test both relevance and product impact.', 'This can reward reproducing the generator’s errors and biases.', 'A lower training loss does not demonstrate better held-out ranking or user outcomes.'] }
+    },
+    {
+      id: 'case-online-regression', title: 'Offline NDCG rises, but online conversion falls', minutes: 11,
+      subtitle: 'A debugging technical review: form hypotheses, test them, and make a launch decision.', bridge: [2, 17, 25, 26], sources: [],
+      scenario: 'A new ranker improves judged NDCG@10 by 4% relative offline. In an online test, download conversion appears lower and p95 latency is higher. The product team asks whether to ship. All numbers in this exercise are invented.',
+      blocks: [
+        { title: '1. Do not defend or reject the model yet', body: `Ask for baseline values, uncertainty, experiment duration, assignment unit, outcome maturation, and the guardrail thresholds. “4% relative NDCG” does not mean four percentage points, and NDCG and conversion do not share a scale.
+
+Suppose the hypothetical review shows enough evidence of a latency guardrail breach. Pause or roll back according to the rollout policy while investigating. If the conversion decrease is still statistically uncertain, say so; do not announce a proven decrease from a negative point estimate alone.
+
+Your job is to protect the experience and identify the mechanism, not preserve a favorite model. Preserve experiment metadata and diagnostic traces permitted by policy so the failure can be analyzed.` },
+        { title: '2. Verify measurement and comparability', body: `Check sample-ratio mismatch, assignment contamination, event loss, deduplication, denominators, and attribution. Confirm that treatment and control outcomes have equally mature observation windows.
+
+Check whether the offline set reflects current traffic. Did it contain mostly descriptive English queries while online traffic includes many exact-title requests and other languages? Were offline features calculated with future downloads? Did the benchmark use a different candidate policy?
+
+Confirm model, feature, tokenizer, and index versions. A good offline artifact is not necessarily what is being served. This establishes whether you are diagnosing the intended treatment or a deployment mismatch.` },
+        { title: '3. Localize the performance regression', body: `Measure stage-level timings. A new feature can add slow remote lookups even when model inference is fast. Inspect timeouts, missing-feature rates, and whether fallback paths return weaker lists. Compare treatment behavior on cache hits and misses.
+
+Then segment user outcomes by request latency and intent, while remembering these are diagnostic associations rather than randomized subgroup interventions. Slow responses can reduce interaction opportunities and lead to more abandons.
+
+A targeted fix might remove a slow feature, compute it earlier, cap expensive reranking, or use a validated simpler fallback. Retest the altered system; do not assume fixing latency also fixes relevance.` },
+        { title: '4. Localize the quality regression', body: `Inspect exact-title MRR, exploratory NDCG, language slices, tail queries, and new-app behavior. Compare rank changes for representative requests. Did personalization push a generic popular app above the explicitly named app? Did generated judgments overvalue appealing descriptions?
+
+Check label-objective mismatch: semantic fit may improve while downloads fall because availability, trust, price, or familiarity changed. Click behavior is also affected by placement and presentation. Do not conclude that either behavioral data or semantic judgments alone must be correct.
+
+If global popularity became dominant, compare an ablation and new-app coverage. If the judged set was unrepresentative, repair the benchmark before selecting another model against it.` },
+        { title: '5. Decide using evidence and a revised hypothesis', body: `Possible decisions include rollback for a clear guardrail breach, fix telemetry before interpreting results, narrow a treatment to supported intent classes, or reject the modeling change if its quality trade-off is unacceptable.
+
+Example revised hypothesis: “A cheaper reranker on exploratory queries improves discovery while preserving navigational success and meeting the latency objective.” Predefine a new experiment instead of selecting favorable slices after the fact and claiming the original test succeeded.
+
+Document what changed and what remains uncertain. Distinguish root cause, contributing factors, and hypotheses not yet tested. A strong explanation includes the evidence required to choose among them.` },
+        { title: 'Follow-ups the reviewer may ask', body: `**“Does this prove NDCG is useless?”** No. It tests relevance under its judgments and cutoff. The problem may be serving, benchmark representativeness, or a different product objective.
+
+**“Could position bias explain the issue?”** It can distort the training signal and logs. A properly randomized online comparison still evaluates the total treatment effect, subject to assignment, interference, and measurement assumptions.
+
+**“Would you ship to the subgroup that improved?”** Only with a justified hypothesis, uncertainty-aware analysis, and validation. Searching many subgroups after the result can create false discoveries.
+
+**“What would you tell the product team?”** The current evidence does not support broad launch if a guardrail is breached. I would identify the most likely bottleneck, make the smallest testable correction, and rerun a planned comparison.` }
+      ],
+      prompt: 'Explain your first five checks and your launch decision. Clearly distinguish a confirmed failure from a hypothesis.',
+      answer: `“I would not ship solely on the offline gain. I would check uncertainty and guardrails, validate experiment telemetry and mature labels, confirm training-serving parity, localize latency and fallback failures, and inspect intent and locale quality slices. A confirmed operational breach warrants pausing or rollback under the rollout policy. I would then test a targeted correction with a predefined hypothesis, rather than choose a favorable post-hoc subgroup or assume the model architecture caused everything.”`,
+      pitfalls: ['Shipping on offline NDCG despite a confirmed user-facing guardrail breach.', 'Treating a negative point estimate as a proven causal decrease.', 'Cherry-picking a winning subgroup after searching many slices.'],
+      checkpoint: { question: 'What does an offline NDCG gain establish on its own?', options: ['The treatment must increase downloads', 'Better ordering under that evaluation set’s judgments and metric, not guaranteed online product improvement', 'That serving latency cannot regress'], correct: 1, explanations: ['Downloads depend on more than the judged ordering quality.', 'Correct. Offline evidence supports a specific benchmark claim and a reason to test, not a blanket online success claim.', 'Offline relevance scores say nothing about request-path latency.'] }
+    }
   ]
 };
