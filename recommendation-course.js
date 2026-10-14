@@ -181,6 +181,106 @@ For a technical review, explain when to precompute, when to update, what happens
       pitfalls: ['Assuming a retrieval query must be a typed search string.', 'Ignoring frequency bias and false negatives in in-batch training.', 'Claiming new features eliminate cold start automatically.'],
       checkpoint: { question: 'What can be used as the query representation for homepage recommendation retrieval?', options: ['Only the exact name of an app', 'Only a text string entered into a search bar', 'A permitted user/history/context representation'], correct: 2, explanations: ['That may describe a seed-based surface, but it is not the only retrieval context.', 'A homepage need not have typed text.', 'Correct. In retrieval, “query” can refer to the current user or context vector.'] }
     },
+    {
+      id: 'rec-hybrid-ranking', phase: 'Design the system', title: 'Hybrid recommendations, ranking, and final constraints', minutes: 8,
+      subtitle: 'Combine evidence while keeping useful discovery as the goal.', bridge: [4, 6, 9, 25], sources: ['reranking'],
+      blocks: [
+        { title: 'Hybrid is a design choice, not one model', body: `A hybrid recommender can combine candidate sources, add content features to collaborative representations, blend scores, or use a learned ranker. State where the combination occurs and why the signals are complementary.
+
+For example, a history-rich user's candidates may come mostly from collaborative retrieval, while new-app candidates use content evidence. A common ranker can compare user–app affinity, item metadata, context, source evidence, and time-safe behavioral aggregates.
+
+A raw sum of cosine similarity and download counts mixes incompatible units. Use a validated feature-based model or a justified normalized combination. Keep candidate recall and final order as separate evaluation targets.` },
+        { title: 'Ranking targets and multiple outcomes', body: `Logistic regression is a useful pointwise baseline for a defined interaction target. Boosted trees or neural models can add nonlinear interactions; ranking-aware losses can emphasize order. Choose a model because of data, quality gains, and serving constraints.
+
+If predicting click probability and install-given-click, distinguish their denominators. Under the appropriate event relationship, install-per-impression can be expressed as click-per-impression times install-given-click. A click-conditioned model alone should not be evaluated as an unconditional conversion model.
+
+Multi-task models can share representations across outcomes, but losses may compete. Compare task quality and calibration where probabilities are needed. Simple greedy maximization of a short-term outcome can favor familiar apps and ignore meaningful longer-term discovery.` },
+        { title: 'Rerank with explicit rules and trade-offs', body: `First enforce hard eligibility and safety rules. Then consider soft objectives such as relevance, diversity, novelty, and freshness. Hard requirements should not silently become weights that a high score can overcome.
+
+One illustrative diversity method selects items greedily using **λ×relevance − (1−λ)×maximumSimilarityToSelectedItems**. The scores and similarity scales need care; the greedy heuristic is not a proof of globally optimal utility. Evaluate the actual list and product outcome.
+
+Do not assume diversification always helps. A related-app surface may need functional alternatives, while a broad homepage may need multiple interests. Page composition and module ordering require additional slate-level reasoning and are future deep-dive topics.` }
+      ],
+      prompt: 'Explain a hybrid recommender and how you would rank and rerank its candidates.',
+      answer: `“I would state whether hybridization happens in retrieval, features, or scoring, then explain the complementary evidence. A ranker would predict a clearly defined useful outcome from permitted user–item and contextual signals. Final rules enforce eligibility, while diversity and freshness are tested as product trade-offs rather than assumed universally beneficial. I would compare list quality and online impact.”`,
+      pitfalls: ['Calling a raw unnormalized score sum a principled hybrid.', 'Confusing conditional and per-impression outcome probabilities.', 'Trading away hard eligibility for a high relevance score.'],
+      checkpoint: { question: 'Which is a hard constraint rather than a soft preference?', options: ['The app is unavailable for the user’s region or device', 'The app is slightly fresher', 'The app improves category diversity'], correct: 0, explanations: ['Correct. Ineligible inventory should not be promoted merely by a large relevance score.', 'Freshness is often a preference to evaluate, unless a specific policy makes it mandatory.', 'Diversity is normally a quality trade-off, not permission to serve an ineligible item.'] }
+    },
+    {
+      id: 'rec-cold-start', phase: 'Design the system', title: 'Cold start, changing interests, and popularity loops', minutes: 8,
+      subtitle: 'Handle sparse evidence without pretending to know a user’s preferences.', bridge: [9, 16, 25], sources: [],
+      blocks: [
+        { title: 'Separate new users, new items, and sparse contexts', body: `A new user lacks reliable preference history. A new app lacks reliable interaction evidence. A sparse locale or surface may have many users and apps but little applicable feedback. These need different fallbacks.
+
+For new users, eligible contextual popularity and curated choices can provide a useful starting point. Optional explicit interests can help when the product permits them. For new apps, content and metadata representations can supply candidate and scoring paths. For sparse contexts, cautiously sharing representations may help, but evaluate transfer across locales.
+
+Do not infer sensitive attributes simply to fill a sparse profile. State what signals are allowed. An opted-out user needs a functioning contextual or non-personalized path, not a hidden reconstruction of forbidden history.` },
+        { title: 'Update interests without chasing every click', body: `Historical preferences can become stale. A recent interest in moving house may temporarily make planning utilities useful without meaning the person's long-term interests have changed. Use contextual and recency evidence with appropriate weighting and monitoring.
+
+Compare short-term session signals with longer history where those signals are permitted. A single ambiguous interaction should not immediately overwrite everything. Multiple-interest profiles can preserve more than one preference, but add complexity and still need trustworthy feedback.
+
+Also update app metadata, eligibility, item vectors, and popularity aggregates. A fresh model with a stale index is not a fresh recommender. A new app must enter relevant candidate sources before any downstream ranker can help it.` },
+        { title: 'Treat exploration as controlled information gathering', body: `A system that only shows already-popular apps may never learn whether new apps are useful. This is a feedback loop. Exploration can provide evidence, but indiscriminate randomness can hurt user experience.
+
+Start with a justified, quality-controlled exposure strategy and define how its outcomes will be logged and evaluated. Measure both usefulness and exposure distribution. Novelty is unfamiliarity; serendipity is useful unexpected discovery. Unfamiliar bad items do not satisfy that goal.
+
+Contextual bandits and causal exploration policies are advanced follow-ups, not fully taught here. For fundamentals, be able to explain the trade-off, the logging-policy dependence, and why new-item exposure should be tested rather than guaranteed by a popularity boost.` }
+      ],
+      prompt: 'How would you recommend apps to a new user and support new apps without creating a popularity trap?',
+      answer: `“I would separate user and item cold start. New users get an eligible contextual or curated baseline and optional permitted interests. New items use metadata and content-based representations while history develops. I would monitor source coverage and exposure, consider controlled quality-safe exploration, and evaluate whether the change improves useful discovery rather than exposure alone.”`,
+      pitfalls: ['Calling every cold-start problem the same data issue.', 'Assuming randomly promoting new apps guarantees quality.', 'Reconstructing personal histories when a user opts out.'],
+      checkpoint: { question: 'A new app is never retrieved because its popularity feature is zero. What should you address first?', options: ['Only the final ranker’s number of layers', 'Candidate eligibility and metadata-based retrieval paths', 'The user’s star-rating scale'], correct: 1, explanations: ['A larger ranker cannot promote an app absent from its input.', 'Correct. New items need a way into the candidate set before downstream scoring can help.', 'User rating scales do not explain this retrieval exclusion.'] }
+    },
+    {
+      id: 'rec-evaluation', phase: 'Evaluate and explain', title: 'Evaluate relevance, discovery, and online impact', minutes: 9,
+      subtitle: 'Know the benchmark assumptions before trusting a recommendation metric.', bridge: [2, 17, 25], sources: ['sampledMetrics', 'diversity'],
+      blocks: [
+        { title: 'Build a realistic future-interaction benchmark', body: `Use only prior history to make a recommendation at a defined time, then evaluate future outcomes in a stated window. A per-user last-event holdout does not automatically prevent global time leakage: later interactions from other users can still inform item features. Use global cutoffs when the claim requires them.
+
+Define the eligible reference catalog and whether consumed items can be recommended. Keep requests and correlated user observations appropriately grouped. Compare models against the same candidates or explicitly separate retrieval and full-pipeline tests.
+
+Future observed interactions are useful targets but not complete relevance judgments. Logs reflect the old exposure policy, and a useful unexposed app may remain unlabeled. Say what your evaluation can establish and what it cannot.` },
+        { title: 'Top-K metrics and the sampling trap', body: `Recall@K can measure how many known useful future items appear in a recommendation list. NDCG emphasizes useful items near the top under a stated gain convention. Hit rate records at least one success; it equals recall only under particular single-positive setups. The Search module explains these formulas in more depth.
+
+Ranking one positive against 99 sampled negatives is not the same as ranking the full eligible catalog. A model can look excellent against easy sampled negatives and fail to retrieve among millions of plausible apps. Sampling can even change relative model comparisons.
+
+Evaluate against the intended inventory where practical. If you sample, disclose the sampling distribution, count, and limitation rather than label the result full-catalog quality. Use a retrieval benchmark appropriate to what the production candidate generator actually does.` },
+        { title: 'Measure beyond matching historical behavior', body: `Track catalog coverage, exposure distribution, intra-list diversity, appropriate novelty, and quality slices such as new users, new apps, and locale. Define each metric: recommendation diversity is not the same as showing many different items across all users.
+
+An online experiment should have a defined primary outcome, attribution window, randomization unit, and operational guardrails. Account for correlated user behavior and delayed outcomes. CTR is an intermediate signal; more taps can come from distracting or misleading suggestions.
+
+Aggregate wins can hide cold-start harm. Segment deliberately and interpret uncertainty without cherry-picking favorable post-hoc slices. Fairness, discovery, and privacy constraints should influence both data and evaluation, not appear as a final sentence after the architecture.` }
+      ],
+      prompt: 'How would you evaluate a recommender offline and online, and why are sampled ranking metrics risky?',
+      answer: `“I would simulate future requests with time-safe history and a stated eligible catalog, then evaluate retrieval coverage and top-K quality with cold-start and locale slices. Sampled negatives can distort apparent task difficulty and relative model rankings, so I would disclose or avoid that shortcut. I would also track coverage and diversity and run a planned online test on useful discovery with latency and quality guardrails.”`,
+      pitfalls: ['Using future events in a recommendation profile.', 'Reporting sampled-negative results as full-catalog retrieval quality.', 'Calling a CTR increase proof of satisfaction or incremental impact.'],
+      checkpoint: { question: 'A model ranks a positive above 99 easy random negatives. What does that prove?', options: ['It is best against the full catalog', 'Its measured performance on that sampled comparison task, not guaranteed full-catalog ranking quality', 'It will improve online conversion'], correct: 1, explanations: ['The full eligible catalog is a different and often harder comparison set.', 'Correct. The candidate and sampling protocol define the result; they can materially change model comparisons.', 'Offline sampled ranking does not establish a causal online improvement.'] }
+    },
+    {
+      id: 'rec-playbook', phase: 'Evaluate and explain', title: 'Your recommendation design playbook', minutes: 7,
+      subtitle: 'Turn the methods into a clear design and a defensible answer.', bridge: [25, 26, 28], sources: [],
+      blocks: [
+        { title: 'Use a structure that follows the evidence', body: `Use **Surface and goal → Feedback → Baseline → Candidates → Ranking → Evaluation → Serving and risks**. Clarify ambiguity, then state assumptions so the reviewer can correct them.
+
+For an algorithm question, answer **definition → mechanism → small example → failure mode**. For a design question, explain what data exists and why the proposed method fits that data. For a debugging question, verify measurement, localize the failing stage or slice, and test a targeted hypothesis.
+
+Name viable alternatives. “I would start with item neighbors for this related-app surface because they are cheap and interpretable; I would add content evidence for new items” demonstrates judgment more clearly than naming the most advanced model first.` },
+        { title: 'Practice a short and a longer answer', body: `**30 seconds:** “I would clarify the app recommendation surface and useful outcome, establish an eligible contextual baseline, combine content and collaborative candidates where data supports them, and rank with time-safe signals. I would validate top-K quality, cold start, diversity, and online impact under privacy and latency constraints.”
+
+**Two minutes:** Add explicit versus implicit feedback, the sampling assumptions, the model alternatives, candidate coverage, and the experimental outcome. Include one risk and the evidence needed to assess it.
+
+**Ten minutes:** Discuss event schema, representation updates, request-time features, delayed labels, serving fallbacks, bias, and deployment checks. Do not invent Apple production counts or assert internal access. Hypothetical choices should remain labeled assumptions.` },
+        { title: 'Know what is foundational and what comes later', body: `You should now be able to compare content and collaborative methods, explain neighborhood and factorization approaches, distinguish ALS from BPR, design complementary candidates, handle cold start, and question an evaluation protocol.
+
+This module introduces ranking, diversity, multiple outcomes, and exploration but does not fully teach advanced sequence/transformer recommenders, generative recommenders, contextual bandits, uplift modeling, page/slate optimization, or evidence and messaging personalization. Those are later specialization topics.
+
+The content-matching exercise is a transparent toy, not a trained production model. A practical next step is implementing an item-neighbor or factorization baseline on a safe public dataset with a time-based split. First use the cases below to rehearse reasoning without reading the solution.` }
+      ],
+      prompt: 'Give a two-minute plan for app recommendations. Include a model trade-off, a cold-start path, and an evaluation caveat.',
+      answer: `“Assuming a discovery surface with permitted interaction logs, I would define useful outcomes and eligibility, then benchmark contextual popularity and item neighbors. I would add content candidates for new apps and collaborative or feature-based embeddings for supported users, then rank with request-time signals. ID factorization is efficient but needs history; metadata features broaden coverage but can misrepresent capabilities. I would use time-safe evaluation, disclose the candidate universe, inspect cold-start slices, and validate useful discovery online with quality and latency guardrails.”`,
+      pitfalls: ['Listing algorithms without explaining which data supports each one.', 'Claiming the toy exercise is a complete recommender implementation.', 'Confusing predictive affinity with causal incremental benefit.'],
+      checkpoint: { question: 'What is the best way to justify a recommendation model in a technical review?', options: ['Connect the surface, available evidence, baseline errors, constraints, and evaluation plan', 'Say it is newer than every alternative', 'Avoid discussing any failure modes'], correct: 0, explanations: ['Correct. A model choice is defensible when it follows from the problem and a testable improvement hypothesis.', 'Novelty alone does not establish usefulness or suitability.', 'Understanding failure modes is an important part of applied ML judgment.'] }
+    }
   ],
   cases: [
   ]
