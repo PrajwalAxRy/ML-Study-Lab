@@ -283,5 +283,113 @@ The content-matching exercise is a transparent toy, not a trained production mod
     }
   ],
   cases: [
+    {
+      id: 'rec-case-homepage', title: 'Design personalized app discovery', minutes: 11,
+      subtitle: 'Work from a product goal to candidates, ranking, and an experiment.', bridge: [25, 26], sources: [],
+      scenario: 'A hypothetical app-store homepage has a “Recommended for you” shelf. Design recommendations that help users discover useful apps. Some users have permitted history; others are new or have personalization disabled.',
+      blocks: [
+        { title: '1. Clarify the surface and useful outcome', body: `Ask how the shelf is used, whether it displays only apps, how many visible positions exist, whether installed apps are eligible, and which locales and devices it serves. Clarify the permitted history and measurement constraints before proposing features.
+
+Assume a single app shelf focused on useful new discovery. This is not full homepage page-generation or Apple’s internal architecture. For this exercise, use a clearly attributed discovery/download outcome as an initial proxy and discuss its limits. Guard quality, latency, and new-user experience.
+
+Distinguish users with allowed history from new and opted-out users. The design must serve all three without inventing forbidden signals or assigning preference certainty where evidence is absent.` },
+        { title: '2. Establish data and baseline', body: `Define request-time histories and events for exposure, views, downloads, and any permitted negative signals. Specify what “visible impression” means and the outcome attribution window. Construct app metadata and eligibility snapshots as of each request.
+
+Start with contextual popular or curated eligible apps, segmented appropriately by locale or category when justified. This gives a cold-start path and a benchmark that the personalized model must outperform.
+
+Audit whether popularity simply reflects past promotion. Examine new-item and sparse-locale coverage. Do not select a complex model until you know whether the baseline fails because of insufficient personalization, poor inventory quality, or measurement defects.` },
+        { title: '3. Generate complementary candidates', body: `For history-rich users, test item neighbors and collaborative embeddings. Add content matches to permitted interests and new apps, plus contextual and curated candidates. Union by stable app ID, filter eligibility, and tune source budgets.
+
+A two-tower candidate model is an optional next step, not a required starting architecture. Explain its user/context inputs and app features and how vectors and indexes stay compatible. Audit false negatives and popularity effects in its training comparisons.
+
+Measure what each source adds: useful unique candidates, latency, and cold-start coverage. If a relevant new app never appears, fix candidate access rather than just increasing the final ranker’s capacity.` },
+        { title: '4. Rank, constrain, and serve', body: `Use a simple outcome model or ranking baseline, then compare richer features or objectives under matched conditions. Features may include content affinity, co-interaction evidence, recency, context, and reliable prior aggregates, only where permitted.
+
+Apply mandatory eligibility and quality rules. Test diversity or freshness adjustments to prevent five nearly identical apps from occupying the shelf, but evaluate whether that actually improves useful discovery. Keep contextual or curated fallbacks for limited evidence and timeouts.
+
+Monitor missing features, candidate counts, tail latency, model and index compatibility, and fallback usage. A personalized cache or saved list must respect eligibility, freshness, and any privacy choices.` },
+        { title: '5. Evaluate and answer the follow-ups', body: `Offline, simulate requests with time-safe histories and stated eligible catalogs. Measure candidate recall, top-K quality, coverage, and cold-start slices. Do not disguise sampled negatives as full-catalog evaluation.
+
+Online, predefine the primary discovery outcome, denominator, assignment unit, and guardrails. Interpret uncertainty and delayed labels. An increase in taps without useful downloads or other appropriate outcomes is not necessarily a success.
+
+If asked why not use only popularity, explain personalization and exposure limitations. If asked why not use only content, explain the cross-category relationships collaborative evidence can reveal. If asked how to support opted-out users, describe the genuine contextual baseline rather than a hidden reconstructed profile.` }
+      ],
+      prompt: 'Give a five-minute design for the shelf, including data, baseline, candidate sources, cold start, and one experiment.',
+      answer: `“I would define useful discovery and the shelf’s eligibility and privacy constraints, then establish a contextual or curated baseline. With permitted history, I would combine collaborative, item-neighbor, and content candidates, ensuring new apps have a metadata-based path. I would rank with time-safe evidence, enforce hard constraints, and test diversity and freshness where appropriate. I would evaluate realistic future requests and cold-start slices, then validate discovery online with quality and latency guardrails and a non-personalized fallback.”`,
+      pitfalls: ['Treating a shelf design as solved full-page optimization.', 'Leaving new or opted-out users without a valid baseline.', 'Comparing models on different inventories without acknowledging the change.'],
+      checkpoint: { question: 'What is a suitable recommendation path for a user with personalization disabled?', options: ['Reconstruct hidden preferences from forbidden history', 'Refuse to show any eligible apps', 'Use a permitted contextual or curated non-personalized baseline'], correct: 2, explanations: ['An opt-out is a design constraint, not something to bypass.', 'A useful discovery experience need not require personal history.', 'Correct. The fallback should work with genuinely allowed non-personalized signals.'] }
+    },
+    {
+      id: 'rec-case-new-apps', title: 'Help new apps when collaborative signals are sparse', minutes: 10,
+      subtitle: 'Separate missing exposure from missing quality evidence.', bridge: [9, 17, 25], sources: [],
+      scenario: 'Newly launched apps rarely appear in recommendations. The current recommender depends heavily on historical downloads and item-ID embeddings. The team wants better discovery without lowering recommendation quality.',
+      blocks: [
+        { title: '1. Localize where new apps are lost', body: `Define new-app age using information available at the request, then inspect ingestion, metadata quality, eligibility, candidate membership, and final ranking. A new app may be absent because indexing lags, because only popularity sources retrieve it, or because the ranker interprets missing history as poor quality.
+
+Treat these as separate hypotheses. Inspect examples and traffic slices before promising that an architecture change fixes them all. High exposure to old apps alone is not proof that new apps are useful; you need evidence of both access and quality.
+
+Use a time-based benchmark in which new apps truly have only their launch-time information. Evaluating them with future downloads leaks exactly the evidence unavailable during cold start.` },
+        { title: '2. Provide content-based representation and candidate access', body: `Index title, description, category, and permitted app attributes promptly. Use content candidates or a feature-based app encoder so a new app can be compared with interests without a trained ID vector.
+
+Compare this with a metadata-only baseline before assuming a two-tower network is required. Audit claims that metadata makes about functionality and quality. A vague description may make an app look semantically similar without satisfying the need.
+
+Preserve existing collaborative sources for apps where history is informative. Hybridize at the source or feature level and measure what the new representation adds to relevant candidate coverage.` },
+        { title: '3. Handle unknown history honestly', body: `Distinguish missing behavioral evidence from observed weak performance. Add missingness or support features and use justified smoothed aggregates rather than setting an app’s quality to zero solely because it has no downloads.
+
+An ID-based model can use a default representation, but that default does not discover the app’s individual capabilities. Content features provide a more specific path. Keep new-app scoring calibrated or appropriately comparable with established-app scoring where probabilities are used.
+
+Test whether negative sampling is teaching the model to reject unexposed new apps. Sampled unknowns are a modeling choice, not verified failures. Assess label quality and the intended candidate distribution.` },
+        { title: '4. Explore under quality safeguards', body: `If all data comes from the old popularity policy, a new app may remain unobserved forever. Controlled exposure can collect evidence, but random promotion without quality screening can damage discovery.
+
+Define eligibility and quality checks, the limited exploration strategy, logging, and the decision criteria. Evaluate incrementally whether new exposure leads to useful outcomes, not just more impressions. Consider operational and user-level guardrails.
+
+Bandit algorithms are a possible later extension. At the fundamentals level, explain how the new exposure supplies missing evidence and how you avoid a self-reinforcing popularity loop. Do not call a fixed new-app boost a learned exploration policy.` },
+        { title: '5. Evaluate the intended trade-off', body: `Measure new-app candidate coverage, top-K relevance where judged, useful discovery outcomes, and exposure distribution. Also protect established-app relevance and user experience. A quota can improve representation without necessarily improving usefulness.
+
+Use both request-level and new-app-age slices and interpret uncertainty carefully; low-support item outcomes may be noisy. Account for delayed conversions and future information in popularity aggregates.
+
+A strong final answer is conditional: add metadata-based access and better treatment of missing history, then validate whether controlled discovery earns its cost. The goal is not maximum new-app exposure at any price.` }
+      ],
+      prompt: 'Explain how you would improve new-app discovery while keeping quality stable. Include one retrieval fix, one scoring fix, and one validation step.',
+      answer: `“I would determine whether new apps are lost in ingestion, candidate generation, or ranking. I would add prompt metadata indexing and content-based candidates, distinguish missing history from negative evidence, and inspect sampling and popularity features. I would consider quality-safe controlled exposure where logs lack support, then evaluate useful new-app discovery and overall quality with time-safe benchmarks and an online experiment.”`,
+      pitfalls: ['Promoting every new app regardless of eligibility or usefulness.', 'Using future popularity in a cold-start evaluation.', 'Assuming a default ID vector provides an app-specific content representation.'],
+      checkpoint: { question: 'Why is evaluating launch-day recommendations using next month’s download totals invalid?', options: ['It leaks evidence unavailable when the recommendation would have been made', 'Because download totals can never be used in any model', 'Because new apps do not need evaluation'], correct: 0, explanations: ['Correct. Future popularity artificially removes the cold-start challenge and gives an unrealistic estimate.', 'Time-safe prior aggregates can be valid when permitted and appropriately interpreted.', 'Cold-start behavior especially needs targeted evaluation.'] }
+    },
+    {
+      id: 'rec-case-repetition', title: 'A recommender gets more taps but less useful discovery', minutes: 10,
+      subtitle: 'Investigate repeated suggestions, narrow lists, and misleading evaluation.', bridge: [2, 17, 25], sources: [],
+      scenario: 'A new recommendation model raises tap-through rate, but users see many similar apps and useful download conversion does not clearly improve. Offline scores were measured against a small set of sampled negatives. Decide what to investigate and whether to launch broadly.',
+      blocks: [
+        { title: '1. Verify the evidence before defending a metric', body: `Ask for outcome definitions, uncertainty, experiment assignment, duration, and attribution windows. More taps may reflect interest, confusion, repeated browsing, or appealing presentation. A flat or uncertain conversion estimate is not necessarily a proven decrease.
+
+Inspect whether the product goal was clicks or useful discovery. Check logging, denominators, sample-ratio mismatch, mature outcomes, and latency or quality guardrails. If a confirmed guardrail is breached, follow the rollout policy while investigating.
+
+Do not declare that CTR is always useless. It is an intermediate measure whose relationship to the chosen goal must be understood and validated.` },
+        { title: '2. Revisit the offline protocol', body: `A positive ranked above easy sampled negatives can overstate quality in a realistic catalog. Compare models on a defined eligible reference set and inspect production candidate coverage. Changing the negative distribution can alter relative offline model comparisons.
+
+Check temporal leakage and whether the benchmark represents new users, new apps, locale, and the current surface. Historical positives reflect what the old system exposed, so agreement with history can reinforce its narrow behavior.
+
+Use error examples as well as scalar metrics. Did the new model mostly learn a global popularity feature? Did an embedding collapse many related apps into near-identical high scores? Are candidate sources providing enough variety before ranking?` },
+        { title: '3. Locate why the lists are repetitive', body: `Inspect duplicate IDs, functional overlap, category concentration, repeated exposure across sessions, and filtering rules for already-consumed apps. These are distinct problems. A list can contain unique IDs and still show five nearly interchangeable items.
+
+Measure candidate-source overlap and per-source contributions. If every source supplies the same popular apps, final reranking may have little useful inventory to diversify. Add a complementary source only if it retrieves plausible alternatives.
+
+Compare recent history with long-term interests where permitted. Overweighting one click can make recommendations chase a transient topic. Missing contextual signals can also repeat an irrelevant suggestion despite changing user needs.` },
+        { title: '4. Propose targeted corrections', body: `Fix true duplicates and mandatory eligibility errors first. Then compare diversified candidates, reranking by functional similarity, recency-aware history, and appropriate repeated-exposure controls. Each change needs a hypothesis and an ablation.
+
+Do not maximize diversity alone: a varied list of irrelevant apps is still bad. Distinguish variety, novelty, coverage, and useful discovery. You may need a more meaningful ranking target or multiple outcomes, but carefully define the labels and denominators.
+
+If the current model only improves taps on sampled-offline-friendly lists, a stronger benchmark and a better objective may be more important than a larger neural network.` },
+        { title: '5. Make a launch decision and revised experiment', body: `The current evidence does not establish improved useful discovery. Explain whether this means continuing a safe, adequately planned test, pausing for a confirmed quality breach, or rejecting the change. Base the decision on confidence and agreed guardrails, not your model preference.
+
+Run a revised experiment with predefined discovery outcomes, relevance and repetition measures, operational checks, and selected cold-start or locale slices. Account for multiple comparisons and avoid retrospectively redefining the goal to match a winning metric.
+
+A strong technical review conclusion is: verify measurement, repair the benchmark, localize repetition, and test the smallest justified correction. More taps are a clue, not the entire success story.` }
+      ],
+      prompt: 'Explain your investigation and launch decision. Include why the offline evaluation may mislead and how you would test a diversity change.',
+      answer: `“I would verify telemetry, uncertainty, attribution, and the actual product goal. Sampled negatives may make the offline task unrepresentative, so I would evaluate realistic candidates and inspect slices. I would localize duplicate or narrow candidates versus ranking and repeated-exposure problems, then test a targeted variety or objective change without sacrificing relevance. A CTR gain alone does not establish useful discovery; the launch decision follows predefined outcomes and guardrails.”`,
+      pitfalls: ['Redefining success as CTR only after discovering conversion is flat.', 'Assuming any increase in diversity improves usefulness.', 'Treating sampled-negative offline metrics as a definitive launch argument.'],
+      checkpoint: { question: 'Which statement best describes a useful diversity intervention?', options: ['Maximize unrelated suggestions even if they are irrelevant', 'Fix or test the source of repetition while protecting relevance and measuring useful discovery', 'Declare success as soon as category count rises'], correct: 1, explanations: ['Unrelated bad suggestions do not improve discovery.', 'Correct. Diversity is a product trade-off; quality, source coverage, and online outcomes must all be considered.', 'Category count alone does not establish relevance or user value.'] }
+    }
   ]
 };
