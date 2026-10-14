@@ -268,6 +268,87 @@ Distinguish relevance prediction from causal incremental impact. A high predicte
       pitfalls: ['Equating “not clicked” with “not relevant”.', 'Claiming propensity weighting fixes unexposed inventory without support.', 'Confusing high response probability with incremental causal impact.'],
       checkpoint: { question: 'An app had zero probability of being exposed by the logging policy. Can simple inverse propensity weighting estimate its counterfactual clicks from those logs?', options: ['Yes, assign an infinite weight', 'Yes, use a larger tree', 'No, the logs lack support for that app’s exposure'], correct: 2, explanations: ['An infinite weight does not create missing evidence.', 'Model capacity cannot identify an unsupported counterfactual from those logs alone.', 'Correct. You need additional evidence, assumptions, or a suitable intervention; IPW does not recover outcomes with zero exposure support.'] }
     },
+    {
+      id: 'evaluation-experiments', phase: 'Evaluate and explain', title: 'Offline validation, A/B tests, and diagnosing regressions', minutes: 8,
+      subtitle: 'Build an evidence chain from a benchmark to user impact.', bridge: [2, 17, 25], sources: [],
+      blocks: [
+        { title: 'Make offline evaluation realistic', body: `Use time-based evaluation to simulate future traffic and calculate features as of each request. Keep a ranking request together. Depending on the claim, also hold out query families, users, or new items; a future-traffic test and an unseen-query test answer different questions.
+
+Use a clear relevance rubric and representative judgments. Report uncertainty and paired query-level comparisons. Correlated examples require a suitable resampling unit, such as query or user clusters, rather than pretending each candidate row is independent.
+
+Evaluate retrieval and ranking separately. A fixed-candidate benchmark isolates the ranker; a full-pipeline test captures retrieval changes. Use both where relevant. Segment head/tail queries, exact-title/exploratory intent, language, device, and cold start. Inspect examples as well as averages.` },
+        { title: 'Design the online experiment before shipping', body: `Write the hypothesis and primary outcome first. Define conversion or successful search precisely, including unit, denominator, attribution window, and delayed outcomes. Pick guardrails such as p95 latency, error rate, and critical quality slices.
+
+Choose a randomization unit that limits contamination. User-level assignment may avoid a person switching repeatedly between rankers, but query/session-level designs can be useful under different assumptions. Account for repeated observations when analyzing results.
+
+Estimate sample size from the baseline rate, minimum detectable effect, chosen error rates, and experimental unit. Check logging and sample-ratio mismatch. Run for an appropriate planned duration covering traffic cycles; repeatedly peeking at an ordinary fixed-horizon test inflates false positives unless the analysis accommodates it.` },
+        { title: 'Offline up, online down: a diagnostic sequence', body: `1. Verify assignment, telemetry, metric definitions, and mature outcomes.
+2. Check whether online features, model versions, and candidate sets match offline assumptions.
+3. Inspect latency, timeouts, missing features, and fallback rates.
+4. Slice by intent, language, frequency, and app age to locate regressions.
+5. Audit stale or biased labels and objective mismatch.
+6. Decide whether to roll back, fix measurement, or run a narrower revised test.
+
+An NDCG gain on editor judgments may not translate into installs, but that does not make semantic relevance useless. The benchmark and behavioral outcome measure different aspects. Compare both and make the trade-off explicit. A small positive point estimate without adequate uncertainty is not a proven improvement.` }
+      ],
+      prompt: 'Your ranker improves offline NDCG. Explain what you need before you can claim it improves App Store search.',
+      answer: `“I would verify a time-safe representative benchmark and inspect intent and language slices. Then I would run a predefined randomized experiment with a clear search-success outcome, appropriate analysis unit, mature attribution window, and latency and quality guardrails. Offline gains justify a test, not a causal product claim. If outcomes disagree, I would check measurement, serving parity, performance, and label-objective mismatch.”`,
+      pitfalls: ['Randomly splitting candidate rows from the same request across train and test.', 'Peeking until an ordinary p-value becomes significant.', 'Treating a failed online test as automatic proof that the model architecture is bad.'],
+      checkpoint: { question: 'Why should candidates from one ranking request stay together in a split?', options: ['Otherwise request-specific information can cross the boundary and ranking evaluation loses coherent lists', 'Because every user must have the same query', 'Because ranking does not use validation'], correct: 0, explanations: ['Correct. Row-level splitting can leak shared context and break the query-group structure needed for meaningful ranking evaluation.', 'Users can have many different queries; that is not the reason.', 'Ranking requires careful validation just like other ML tasks.'] }
+    },
+    {
+      id: 'serving-and-privacy', phase: 'Evaluate and explain', title: 'Serving constraints, privacy, and failure analysis', minutes: 7,
+      subtitle: 'Explain how a good model becomes a reliable search experience.', bridge: [9, 25, 26], sources: ['privacy'],
+      blocks: [
+        { title: 'Account for the request-time budget', body: `End-to-end latency includes query processing, candidate fetches, feature lookups, scoring, and response construction. Tail latency matters because an average hides slow requests. Model inference is only one component.
+
+Use an explicit illustrative budget, not invented Apple production numbers. Ask what service-level objective applies, then discuss batching, caching, parallel candidate sources, candidate limits, and a deadline-aware fallback. Cache keys must respect locale and any personalization; stale caches can violate freshness or eligibility.
+
+For deployment, version models, feature schemas, and indexes together. Monitor candidate counts, empty results, feature missingness, score shifts, relevant-item coverage where measurable, latency, and fallback frequency. A changed index can alter the ranker's input distribution even if its weights are unchanged.` },
+        { title: 'Privacy is a design constraint', body: `Do not assume you can log detailed personal histories simply because they would be predictive. Ask which signals are permitted, where processing may occur, how retention is limited, and how opt-outs are honored. Aggregate or contextual features and on-device computation may be options depending on the system.
+
+Apple's public App Store privacy description discusses personalization using interactions as well as on-device and privacy-preserving processing. It does not reveal an exact ranking architecture. Treat the document as a constraint-setting source, not permission to invent internal implementation details.
+
+In a technical review, propose a useful non-personalized baseline and graceful behavior for limited-history or opted-out users. Discuss performance, privacy, and measurement trade-offs without claiming that “privacy-preserving” is automatically achieved by deleting a name.` },
+        { title: 'Debug the stage responsible', body: `For a missing result: check eligibility, index freshness, query processing, source coverage, and ANN retrieval before blaming ranker weights. For a low-ranked candidate: inspect features, labels, score contributions, and training coverage. For slow requests: inspect stage-level timing and tail distributions.
+
+When a new app performs poorly, ask whether it lacks metadata, candidate exposure, or reliable interaction features. Compare metadata-only fallback behavior with history-rich scoring. When an exact app title regresses, inspect tokenization and intent-specific ranking before increasing personalization.
+
+Tie each proposed fix to a test: an offline slice, a canary with operational checks, or a controlled product experiment. “Add more data” is not a diagnosis unless you say which missing evidence the new data supplies.` }
+      ],
+      prompt: 'What non-model considerations would you include when productionizing an App Store search ranker?',
+      answer: `“I would budget end-to-end tail latency, validate feature and index freshness, ensure training-serving parity, and add a safe fallback and rollback path. I would monitor coverage and quality slices alongside operational failures. I would use only permitted signals, respect opt-outs and retention, and keep a useful contextual or non-personalized baseline.”`,
+      pitfalls: ['Measuring average inference latency while ignoring feature-fetch timeouts.', 'Assuming anonymized IDs alone guarantee privacy.', 'Proposing personalization without an opted-out or cold-start path.'],
+      checkpoint: { question: 'A model’s inference time is unchanged, but p95 search latency worsens after adding a feature. What should you check?', options: ['Only the model parameter count', 'Feature-fetch latency, timeouts, and request-path dependencies', 'Whether NDCG uses logarithms'], correct: 1, explanations: ['Parameter count alone does not account for the whole request path.', 'Correct. A slow or unreliable feature dependency can dominate end-to-end latency without changing inference time.', 'The offline metric formula is unrelated to that serving-path regression.'] }
+    },
+    {
+      id: 'interview-playbook', phase: 'Evaluate and explain', title: 'Your technical reasoning playbook and advanced follow-ups', minutes: 8,
+      subtitle: 'Turn concepts into concise answers and defensible decisions.', bridge: [25, 26, 28], sources: ['apple'],
+      blocks: [
+        { title: 'Structure every design answer', body: `Use **Goal → Data → Retrieval → Ranking → Evaluation → Serving → Risks**. This is a memory aid, not a script to recite regardless of the question.
+
+Start with the user need and one or two key clarifications. State assumptions if information is missing. Choose a baseline, then justify the next level of complexity using a specific failure mode. Define labels, features, and split before naming a fancy loss. Finish with metrics, experiments, latency, privacy, and cold start.
+
+For a definition question, use **definition → mechanism → example → trade-off**. For a debugging question, use **verify → localize → hypothesize → test → decide**. For “Why this model?”, compare viable alternatives under the same constraints rather than defend your favorite model unconditionally.` },
+        { title: 'Practice at three depths', body: `**30 seconds:** “Search first retrieves eligible candidates and then ranks them for the query. I would combine lexical and semantic evidence, measure candidate coverage and top-K relevance, then test user impact with latency and privacy guardrails.”
+
+**Two minutes:** Add query intent, a simple baseline, the label strategy, ranking objective, and the online experiment. Say what you would measure to justify each change.
+
+**Ten minutes:** Work a system design with data schema, request-time features, negative sampling, bias, latency decomposition, cold start, and failure analysis. Let the reviewer steer deeper. Explain formulas only when they answer the question; technical detail should support your decision.` },
+        { title: 'Know the modern follow-ups without losing the basics', body: `LLMs can help generate query–app relevance judgments, rewrite queries, or support a reranker. These are distinct jobs. LLM-generated labels are not automatically ground truth: define a rubric, calibrate against expert judgments, audit locale and tail-query failures, and keep evaluation independent of generated training labels.
+
+Apple has published App Store research combining textual relevance judgments generated with an adapted LLM and behavioral ranking evidence, with offline and online validation. This is a useful technical review discussion topic, not evidence that your reviewer will ask about a particular model.
+
+Also know multi-task and multi-objective trade-offs, representation distillation for lower serving cost, controlled exploration, and multimodal metadata when the role warrants it. Learn the purpose and failure modes first. These are follow-ups after a solid retrieval/ranking/evaluation foundation, not replacements for it.` },
+        { title: 'A readiness checklist', body: `You should be able to explain where a missing relevant app was lost, choose a top-K metric, write a pairwise loss, spot future-data leakage, explain position bias, and design an online test.
+
+You should also be able to say “I do not know the internal implementation, but under these assumptions I would test…” That is stronger than an unsupported claim. Use the next three cases to rehearse the full chain of reasoning, then revisit a case without reading its walkthrough.` }
+      ],
+      prompt: 'Give a two-minute answer to “How would you improve App Store search?” Include one explicit assumption and one trade-off.',
+      answer: `“Assuming we are improving organic app discovery, I would clarify intent, latency, and success first. I would audit misses versus bad ordering, use a lexical baseline, and test semantic candidates where paraphrases fail. I would train a query-grouped ranker with time-safe features and both reliable semantic and behavioral evidence, then evaluate recall and NDCG by intent and locale. I would validate conversion or search success in a planned A/B test with latency and quality guardrails. A richer reranker may improve semantic matching but must earn its extra request-time cost.”`,
+      pitfalls: ['Reciting architecture without a hypothesis or evaluation plan.', 'Presenting LLM labels as infallible expert judgments.', 'Pretending a hypothetical design describes Apple’s internal system.'],
+      checkpoint: { question: 'What is the strongest opening to an ambiguous search-system design question?', options: ['Choose the largest available model', 'List every ranking algorithm you know', 'Clarify the user goal and constraints, then state assumptions and a baseline'], correct: 2, explanations: ['Model size does not establish what problem you are solving.', 'A catalog of names is not a reasoned design.', 'Correct. A clear goal and constraints make model, data, and evaluation choices defensible.'] }
+    }
   ],
   cases: [
   ]
