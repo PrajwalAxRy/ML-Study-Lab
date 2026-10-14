@@ -370,6 +370,84 @@ Report cost per useful unit, such as requests meeting the quality and deadline t
       pitfalls: ['Adding stage p95 values as if they equal request p95.', 'Assuming every ML model should serve on a GPU.', 'Claiming a throughput gain without measuring batching delay or quality.'],
       checkpoint: { question: 'What should you measure when increasing dynamic batch waiting time?', options: ['Throughput and end-to-end latency together', 'Only GPU utilization', 'Only the number of stored model parameters'], correct: 0, explanations: ['Correct. More efficient batches can also increase request waiting time.', 'High utilization does not establish deadline compliance.', 'Parameter count does not capture queueing and serving overhead.'] }
     },
+    {
+      id: 'prod-deployment', phase: 'Operate responsibly', title: 'Release models with shadowing, canaries, and rollback', minutes: 8,
+      subtitle: 'Make deployment a controlled change to a compatible system.', bridge: [2, 17, 25], sources: ['registry'],
+      blocks: [
+        { title: 'Validate before routing traffic', body: `Test package loading, schema compatibility, preprocessing, feature versions, representative predictions, and mandatory constraints. A process should become ready only after required artifacts can serve valid requests.
+
+Containers package a runtime environment; they do not automatically guarantee model quality, data compatibility, or reproducible source data. A deployment platform can route and restart processes, but needs suitable resources, health signals, permissions, and rollout settings.
+
+Keep old and new packages available during controlled transitions when the architecture requires them. Coordinate a changed encoder and its retrieval index. A successful code deployment with an incompatible feature contract is still a failed ML release.` },
+        { title: 'Shadow, canary, and A/B are different tools', body: `Shadow traffic computes new outputs alongside live requests without changing the returned product response. It can test operational behavior and output differences, but does not establish user impact. Avoid letting shadow runs create unintended external side effects or excessive dependency load.
+
+A canary serves a limited amount of real traffic to check safety and operations. An A/B experiment aims to estimate a defined causal comparison under a suitable assignment and analysis plan. A small operational canary is not automatically a statistically powered experiment.
+
+Define primary outcomes, guardrails, attribution, and stop criteria before rollout. Monitor exposure and assignment correctness. If multiple layers or caches determine versions, verify what users actually received rather than assume routing configuration tells the entire story.` },
+        { title: 'Rollback the compatible package', body: `Prepare a last-known-good model with its compatible feature and index dependencies, then test rollback. Moving an alias alone may not undo a schema migration or feature-definition change.
+
+Make rollback actions explicit and authorized under a runbook. Check tail latency, error rate, feature freshness, and product metrics after the action. Logs should retain safe provenance for both treatment and fallback outputs.
+
+Use kill switches or limited feature flags where appropriate, but avoid leaving stale, undocumented exceptions indefinitely. A deployment is complete when the system can explain, observe, and recover the change, not merely when new weights load successfully.` }
+      ],
+      prompt: 'Distinguish a shadow run, canary rollout, and A/B experiment, then describe a rollback plan.',
+      answer: `“Shadowing compares behavior without altering the live response; canaries limit live operational exposure; A/B tests estimate a predefined user outcome comparison. I would validate compatibility before traffic, monitor operational and quality guardrails, and keep a tested rollback of the entire compatible model/feature/index package rather than only a mutable alias.”`,
+      pitfalls: ['Treating shadow predictions as evidence of improved user behavior.', 'Calling every canary an adequately powered experiment.', 'Rolling back weights while leaving incompatible features in place.'],
+      checkpoint: { question: 'Can shadow traffic alone establish that users prefer the new rankings?', options: ['Yes, because the model runs on real inputs', 'No; shadow outputs do not change what users experience', 'Yes, if the model is larger'], correct: 1, explanations: ['Real inputs are useful for operational checks, not a user-response comparison to unseen outputs.', 'Correct. User impact needs an appropriately designed live comparison.', 'Model size does not fix the missing exposure.'] }
+    },
+    {
+      id: 'prod-observability', phase: 'Operate responsibly', title: 'Monitor data, features, model behavior, and the product', minutes: 9,
+      subtitle: 'Detect failures that successful jobs and healthy CPUs miss.', bridge: [2, 8, 17, 25], sources: [],
+      blocks: [
+        { title: 'Observe four layers', body: `**Infrastructure:** latency, errors, saturation, queues, and dependency timeouts. **Data/features:** schema, completeness, duplicates, missingness, freshness, ranges, and materialization delay. **Model:** score distributions, label-based quality when available, calibration where needed, and important slices. **Product:** useful outcomes and agreed guardrails.
+
+A green pipeline status means a task completed, not that every valid event arrived or the feature values are correct. Compare source-to-sink counts with documented rejection and deduplication accounting; simple equal totals may be wrong if the transformation legitimately changes row counts.
+
+Record safe traces and version metadata to localize changes. More raw logging is not automatically better: bound volume, avoid secrets, and respect retention and allowed data.` },
+        { title: 'Drift is a signal, not a root cause', body: `Data drift is a change in input distribution; concept drift concerns the relationship between inputs and outcomes. Performance requires appropriate outcome evidence, which can be delayed or selectively observed. A changed score distribution does not by itself prove quality degradation.
+
+Inspect slices such as locale, new users, and request type. Distinguish legitimate traffic change from missing features, schema bugs, or delayed ingestion. Automatic retraining on corrupted data may amplify the issue instead of repairing it.
+
+Use alert thresholds tied to risk and uncertainty. Avoid pages on harmless daily variation and dashboards with no response owner. Define who investigates, which evidence is needed, and how a breach affects serving or promotion.` },
+        { title: 'A practical incident sequence', body: `1. Verify telemetry and the claimed impact.
+2. Identify affected times, versions, and cohorts.
+3. Trace upstream contracts, source delay, feature age, and served inputs.
+4. Check deployment and training-serving compatibility.
+5. Apply a bounded fallback or rollback under the runbook.
+6. Repair, replay or backfill safely, validate, and restore.
+
+Treat completeness and freshness separately. A source can deliver quickly while omitting one event type. A stream can be correct but too delayed for a live feature. After recovery, verify current and historical outputs rather than stop when a queue drains.` }
+      ],
+      prompt: 'The service is healthy but recommendation quality drops. What non-model checks would you perform first?',
+      answer: `“I would verify measurement and localize time, version, and cohort changes, then check source completeness, schema, feature age and missingness, and training-serving compatibility. Infrastructure health is not feature correctness. I would distinguish drift from broken data and only retrain or roll back when the evidence and runbook justify it.”`,
+      pitfalls: ['Equating a successful task with complete data.', 'Retraining automatically on corrupt inputs.', 'Treating every distribution shift as proven concept drift.'],
+      checkpoint: { question: 'A feature pipeline succeeds but one locale sends no download events. What is missing?', options: ['More model layers first', 'Only a CPU dashboard', 'Completeness checks sliced by source, event type, and locale'], correct: 2, explanations: ['The data defect should be investigated before model capacity.', 'CPU health cannot establish event coverage.', 'Correct. Aggregate job success can hide an absent event or cohort.'] }
+    },
+    {
+      id: 'prod-reliability', phase: 'Operate responsibly', title: 'Recovery, privacy, cost, and a practical build plan', minutes: 9,
+      subtitle: 'Choose a manageable architecture and test its failure paths.', bridge: [25, 26, 27], sources: [],
+      blocks: [
+        { title: 'Define recovery and data governance', body: `Replication helps availability under certain failures, while backups and replay support different recovery needs. They are not interchangeable. Define acceptable data loss (RPO) and recovery time (RTO), then test restoration and the availability of required source history.
+
+Version artifacts and feature schemas, protect checkpoints, and ensure fallback paths still enforce mandatory constraints. A source archive is only useful while retention permits the needed replay. Deleting personal data must account for downstream tables, caches, features, and other derived copies under policy.
+
+Use least-privilege service identities, encrypted transport and storage as required, managed secret access, and controlled audit metadata. Hashing an identity does not automatically anonymize behavior. Do not ingest data merely because it could improve a model.` },
+        { title: 'Budget the whole system', body: `Count storage retention and replication, event transport, analytical scans, training, accelerators, online stores, network transfers, and human operation. A cheap model can rely on expensive feature queries. A managed service reduces some operations but does not remove governance, access, or cost responsibilities.
+
+Measure cost per relevant workload and good response, not only a cloud bill total. Use partition pruning, compact suitable files, bound backfills, and right-size compute. Separate an optimization that saves idle resources from one that risks quality or recovery.
+
+Introduce complexity only for a demonstrated requirement. A relational database, scheduled computation, versioned files, and a simple API can be an excellent first system if its scale and freshness contract fit.` },
+        { title: 'A safe local prototype to build next', body: `Use synthetic data, not real workplace or personal logs. Begin with SQLite or PostgreSQL for a toy catalog and a JSONL event file. Validate schema and stable IDs, deduplicate into a clean table, compute past-only features, train a small baseline, and save a model with its preprocessing version.
+
+Add a simple prediction API, load the artifact once, log synthetic request IDs and versions, and define a timeout or missing-feature fallback. Test duplicates, late arrivals, backfills, stale features, and an incompatible artifact. Compare repeated runs to confirm logical outputs remain consistent.
+
+Only then replace a file boundary with a broker or add streaming and distributed workers if the learning goal or workload requires them. This module provides blueprints and illustrative code, not a deployed Kafka cluster, a cloud account, or a complete implementation repository.` }
+      ],
+      prompt: 'Give an end-to-end production design in terms of contracts, storage, compute, serving, monitoring, and recovery. State what you would build first.',
+      answer: `“I would clarify load, freshness, deadline, permitted data, and recovery requirements, then choose the smallest compatible architecture. I would define validated replayable or batch ingestion, workload-appropriate storage, time-safe feature and training versions, a bounded prediction path, and layered monitoring. I would test restore and fallbacks and include deletion, access, and total cost before adding distributed components.”`,
+      pitfalls: ['Assuming replicas replace backups or tested restore.', 'Treating hashed identifiers as automatically anonymous.', 'Adding distributed services to a prototype without a workload reason.'],
+      checkpoint: { question: 'What is the best first build for learning an end-to-end ML system?', options: ['A small synthetic pipeline with versioning and failure tests, adding infrastructure when justified', 'A production-sized cluster before defining inputs', 'Real workplace data copied into an unmanaged personal store'], correct: 0, explanations: ['Correct. A bounded prototype teaches the contracts and failure modes with manageable scope.', 'Infrastructure first obscures the data and serving requirements.', 'Use only authorized, appropriately governed data; synthetic examples are a safer learning starting point.'] }
+    }
   ],
   cases: [
   ]
