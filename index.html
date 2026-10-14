@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#eeedf8">
+  <meta name="description" content="A private learning workspace for machine-learning concepts, exercises, and case studies.">
+  <title>ML Study Lab</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to study content</a>
+
+  <div class="app-shell" id="app-shell">
+    <aside class="study-rail" id="study-rail" aria-label="Study navigation">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">ML</div>
+        <div>
+          <strong>Study Lab</strong>
+          <span>Private learning workspace</span>
+        </div>
+      </div>
+
+      <nav class="primary-nav" aria-label="Primary">
+        <button class="nav-action is-active" type="button" data-view="home">
+          <span class="nav-icon" aria-hidden="true">⌂</span>
+          Today
+        </button>
+        <button class="nav-action" type="button" data-action="quick-practice">
+          <span class="nav-icon" aria-hidden="true">▶</span>
+          Quick practice
+        </button>
+        <button class="nav-action" type="button" data-action="challenge">
+          <span class="nav-icon" aria-hidden="true">⚑</span>
+          Challenge run
+        </button>
+        <button class="nav-action" type="button" data-view="library">
+          <span class="nav-icon" aria-hidden="true">⌕</span>
+          Question library
+        </button>
+        <button class="nav-action" type="button" data-view="learn">
+          <span class="nav-icon" aria-hidden="true">▤</span>
+          Learning room
+        </button>
+        <button class="nav-action" type="button" data-view="saved">
+          <span class="nav-icon" aria-hidden="true">◇</span>
+          Saved questions
+        </button>
+      </nav>
+
+      <div class="trail-heading">
+        <span>Skill trail</span>
+        <button class="icon-button" type="button" id="collapse-all" aria-label="Collapse all priority groups" title="Collapse all groups">−</button>
+      </div>
+      <nav class="skill-trail" id="skill-trail" aria-label="Topics"></nav>
+
+      <div class="rail-tools">
+        <button class="quiet-action" type="button" id="export-progress">Export progress</button>
+        <label class="quiet-action import-label" for="import-progress">Import progress</label>
+        <input class="visually-hidden" id="import-progress" type="file" accept="application/json">
+        <button class="quiet-action" type="button" id="reset-progress">Reset progress</button>
+        <div class="reset-confirm" id="reset-confirm" hidden>
+          <p>Erase all ratings, course progress, notes, and XP?</p>
+          <div>
+            <button class="danger-action" type="button" id="confirm-reset">Erase</button>
+            <button class="quiet-action" type="button" id="cancel-reset">Keep progress</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="mobile-header">
+      <button class="icon-button" type="button" id="open-menu" aria-label="Open study navigation" aria-expanded="false">☰</button>
+      <div class="mobile-brand"><strong>ML Lab</strong><span id="mobile-level">Level 1</span></div>
+      <button class="icon-button" type="button" data-view="library" aria-label="Search question library">⌕</button>
+    </div>
+
+    <main class="workspace" id="main-content" tabindex="-1">
+      <div class="loading-state" id="loading-state" role="status">
+        <span class="loading-line"></span>
+        <span class="loading-line short"></span>
+        <span class="loading-block"></span>
+      </div>
+    </main>
+
+    <aside class="field-log" id="field-log" aria-label="Learning progress"></aside>
+  </div>
+
+  <nav class="mobile-nav" aria-label="Mobile navigation">
+    <button class="is-active" type="button" data-view="home"><span aria-hidden="true">⌂</span>Today</button>
+    <button type="button" data-action="quick-practice"><span aria-hidden="true">▶</span>Practice</button>
+    <button type="button" data-view="learn"><span aria-hidden="true">▤</span>Learn</button>
+    <button type="button" data-view="library"><span aria-hidden="true">⌕</span>Library</button>
+  </nav>
+
+  <div class="rail-scrim" id="rail-scrim" hidden></div>
+  <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <div class="sr-status visually-hidden" id="sr-status" aria-live="polite"></div>
+
+  <script src="/search-course.js" defer></script>
+  <script src="/recommendation-course.js" defer></script>
+  <script src="/production-course.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>
