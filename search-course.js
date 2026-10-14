@@ -116,6 +116,81 @@ Index freshness matters when apps or encoders change. Query and app encoders mus
       pitfalls: ['Saying embedding similarity guarantees relevance.', 'Treating every unclicked or in-batch item as truly irrelevant.', 'Updating the query encoder without a compatible item index.'],
       checkpoint: { question: 'ANN matches exact vector search almost perfectly, but relevant apps are still missing. What is the likely next investigation?', options: ['Assume retrieval is solved', 'Remove all hard negatives', 'Audit representations, labels, and task-level retrieval recall'], correct: 2, explanations: ['Exact vector neighbors are not necessarily relevant apps.', 'Some hard negatives may be wrong, but removing all of them is not a diagnosis.', 'Correct. The index may be accurately searching an embedding space that poorly represents the actual relevance task.'] }
     },
+    {
+      id: 'hybrid-search', phase: 'Understand search', title: 'Hybrid retrieval and query understanding', minutes: 6,
+      subtitle: 'Combine complementary evidence without mixing incompatible scores.', bridge: [2, 9, 25], sources: ['hybrid'],
+      blocks: [
+        { title: 'Run complementary candidate sources', body: `Consider “Notion”: a lexical retriever can find the exact app. For “organize notes with my team”, semantic retrieval may find useful apps without exact phrase matches. A hybrid design can retrieve from both, take the union, deduplicate by stable app ID, and pass the eligible candidates to a ranker.
+
+Do not assume a union is free. With a fixed candidate budget, one source can crowd out another. Compare source contributions and relevant-item overlap. Decide how much capacity each query class needs using held-out evaluation.
+
+Apply region, device compatibility, and availability rules as early as practical, with final checks before serving. Filtering only after retrieving a tiny top list can leave too few eligible results; oversampling or filter-aware retrieval may be needed.` },
+        { title: 'Fuse rankings, not arbitrary scales', body: `BM25 scores and cosine similarities are on different scales. Adding them directly can make one source dominate for numerical rather than relevance reasons.
+
+**Reciprocal rank fusion (RRF)** assigns an item a contribution **1 / (c + rank)** from each source list. An absent item contributes zero for that list. Sum contributions and sort. The positive constant c controls how strongly top positions stand out. RRF is a useful starting point because it avoids comparing raw score units.
+
+Alternatively normalize/calibrate scores and tune a weighted combination on held-out judgments, or let a learned ranker use both as features. None of these is automatically best for every catalog. Measure exact-title preservation, tail-query quality, and latency.` },
+        { title: 'Interpret the query carefully', body: `Query understanding can include language detection, typo correction, synonyms, intent classification, and entity recognition. Autocomplete is a related task with partial input and tight latency needs.
+
+Keep the original query when expanding or rewriting. “Calm” could be an app name or a general request; blindly rewriting it as “meditation” may lose navigational intent. Compare alternative interpretations rather than treating a rewrite as certain.
+
+Query-specific personalization should help break ties among relevant results, not override a clear request. Track slices such as head/tail, navigational/exploratory, language, and new apps. Aggregate gains can hide a severe regression in one of them.` }
+      ],
+      prompt: 'How would you combine BM25 and semantic search, and what could go wrong?',
+      answer: `“I would retrieve from both, preserve eligibility and exact-title matches, and combine candidates by stable ID. I would start with rank fusion or a trained ranker using both signals rather than add unnormalized scores. I would compare quality and cost by query intent and frequency, because semantic gains on exploratory queries can conceal navigational regressions.”`,
+      pitfalls: ['Adding BM25 and cosine scores without discussing scale.', 'Rewriting every query and dropping the original.', 'Calling candidate union guaranteed to improve recall at a fixed budget.'],
+      checkpoint: { question: 'What is the main practical attraction of RRF?', options: ['It proves that dense retrieval is always better', 'It combines source ranks without requiring comparable raw score scales', 'It generates ground-truth labels'], correct: 1, explanations: ['RRF does not establish which source is better.', 'Correct. It uses rank positions to combine evidence from different retrieval lists.', 'Fusion orders candidates; it does not determine their true relevance.'] }
+    },
+    {
+      id: 'ranking-data', phase: 'Build a ranker', title: 'Build the training table: groups, features, and labels', minutes: 8,
+      subtitle: 'A ranker is only as sound as the comparisons in its data.', bridge: [8, 9, 10, 17], sources: [],
+      blocks: [
+        { title: 'Think one request, many candidate rows', body: `A training row describes a query–app pair in a specific context. A group contains the candidates being compared for one request. If a query repeats for different users or times, decide whether the grouping key should be the request rather than the raw query text.
+
+A toy group for “offline hiking” might contain Trail Atlas (grade 3), Trek Planner (grade 2), Hike Notes (grade 1), and Photo Studio (grade 0). Grades are human-defined usefulness, not model scores. This toy scale is a teaching choice, not an App Store policy.
+
+You can use query features (language, intent), app features (category, metadata quality), matching features (BM25, embedding similarity, title match), and permitted context features. Candidate-source indicators can help the ranker interpret different retrieval paths.` },
+        { title: 'Define the target and its observation window', body: `Human judgments measure semantic fit using a clear rubric. Interaction labels measure behavior under the system that showed the result. Clicks are plentiful but noisy; downloads or installs may be more meaningful but delayed and sparse. Neither perfectly captures satisfaction.
+
+For a conversion label, define the attribution rule, denominator, and observation window. An impression from yesterday may not yet have a mature outcome. Treating it as negative can introduce delayed-label bias.
+
+If you sample negatives, distinguish unexposed apps, exposed-but-not-clicked apps, and judged irrelevant apps. They supply different evidence. Unexposed items are not known rejections. Sample easy and hard negatives with quality checks; align training comparisons with serving candidates.` },
+        { title: 'Prevent leakage and representation traps', body: `Build all features as of the request time. A download count calculated using next week's events leaks the future. Query–app conversion rates need enough support, smoothing, and time-safe aggregation. Exclude the row's own outcome from any target-derived feature.
+
+Use metadata and matching features for new apps rather than rely entirely on app IDs or accumulated popularity. Audit coverage, feature missingness, and feedback quality by language and query frequency. A sparse app ID can memorize head traffic and fail cold start.
+
+Separate feature importance from causal effects. A high-importance download feature does not prove downloads cause relevance. Run feature ablations and inspect query-level examples. Training data produced by the old ranker is policy-dependent, a subject we will revisit.` }
+      ],
+      prompt: 'Describe the rows, groups, features, and labels you would use for an app-search ranker.',
+      answer: `“Each row is a query–app–context candidate, and comparisons are grouped by the ranking request. I would combine text matches, semantic similarity, metadata, and permitted context. I would separately define semantic judgments and behavioral targets, respect label maturation and attribution, and calculate features strictly as of request time. I would audit exposure bias, negative sampling, and new-app coverage.”`,
+      pitfalls: ['Training pairs across unrelated queries.', 'Calling unseen apps negative examples without qualification.', 'Using future aggregate popularity or the eventual outcome as an input feature.'],
+      checkpoint: { question: 'Which feature leaks information?', options: ['Download totals calculated through the week after the request', 'Category known at request time', 'BM25 score from the request-time index'], correct: 0, explanations: ['Correct. It contains future behavior that was not available at serving time.', 'This is a legitimate request-time feature if the historical value is used.', 'This is legitimate when the index and metadata reflect what was available then.'] }
+    },
+    {
+      id: 'ranking-losses', phase: 'Build a ranker', title: 'Pointwise, pairwise, and listwise learning', minutes: 9,
+      subtitle: 'Connect familiar losses to ordering decisions.', bridge: [4, 19, 21], sources: ['ranknet'],
+      blocks: [
+        { title: 'Pointwise: score each example', body: `Pointwise learning predicts a label for each query–app pair. Logistic regression with binary cross-entropy can estimate an interaction probability under stated conditions; regression can predict a relevance grade. Sort candidates by the score.
+
+This is a useful baseline because it connects directly to your bank. However, improving average log loss or MSE does not guarantee improving top-of-list order. The model may improve many easy negatives while barely changing the first few results.
+
+A score from a pairwise or listwise ranker is not automatically a probability. If another decision requires calibrated probabilities, evaluate calibration separately. Ranking quality and calibration answer different questions.` },
+        { title: 'Pairwise: learn which item should be above another', body: `For two apps in the same query group, suppose A has a higher relevance grade than B. Let their model scores be sA and sB. A RankNet-style formulation predicts **P(A above B) = sigmoid(sA - sB)** and applies binary cross-entropy to that preference. For a strict positive preference, the loss is **log(1 + exp(-(sA - sB)))**.
+
+If sA=1 and sB=2, the model gives A only about 0.269 probability of winning. The loss is about 1.313. Increasing A relative to B reduces this penalty. Only score differences matter to this pair; adding the same constant to both scores changes nothing.
+
+Avoid arbitrary comparisons between different queries. Handle ties deliberately rather than manufacturing strict preferences. Sampling pairs reduces computational cost and changes the effective training emphasis.` },
+        { title: 'Listwise: learn from a whole candidate list', body: `Listwise approaches define objectives over a query's candidates or permutations. A simple teaching example normalizes gains into a target distribution and fits a softmax distribution over scores; other methods such as ListMLE use permutation likelihood. These are examples, not one universal listwise loss.
+
+Listwise context can better reflect competition among candidates, but the loss, label convention, and sampled list still need to match the intended metric. Discrete sorting metrics do not generally provide ordinary useful gradients, so training uses differentiable surrogates or metric-informed gradient constructions.
+
+Do not answer “listwise is always best”. Compare data volume, label quality, latency, model class, and top-K performance. All three families can produce an ordered list at inference.` }
+      ],
+      prompt: 'Compare pointwise, pairwise, and listwise ranking, using logistic regression as your starting point.',
+      answer: `“Pointwise predicts individual outcomes and sorts scores. Pairwise learns within-query preferences using score differences. Listwise trains with a whole list or permutation objective. The distinction is the training formulation, not whether inference returns a list. I would start with a reliable pointwise baseline, then test a ranking-aware objective on query-grouped data and evaluate top-K quality.”`,
+      pitfalls: ['Saying pairwise scores are calibrated click probabilities.', 'Comparing an app for one query with an app for a different query.', 'Claiming a listwise loss directly and exactly optimizes every ranking metric.'],
+      checkpoint: { question: 'For a pairwise loss based on sA − sB, what happens if you add 10 to both scores?', options: ['The predicted preference flips', 'The preference probability becomes 1', 'The predicted preference is unchanged'], correct: 2, explanations: ['The difference does not change, so the order does not flip.', 'A common shift does not increase the score difference.', 'Correct. (sA+10) − (sB+10) equals sA − sB. Absolute score values are not sufficient to interpret this preference as a click probability.'] }
+    },
   ],
   cases: [
   ]
