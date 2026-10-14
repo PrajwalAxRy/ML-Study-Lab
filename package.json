@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node tests/learning.test.cjs"
+    "test": "node tests/learning.test.cjs",
+    "test:browser": "node tests/learning-browser.cjs"
   },
   "engines": {
     "node": ">=18"

@@ -4,7 +4,7 @@ const path = require('path');
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4173);
-const host = process.env.HOST || '0.0.0.0';
+const host = process.env.HOST || '127.0.0.1';
 const progressPath = path.join(root, 'progress.json');
 const maxProgressBytes = 2 * 1024 * 1024;
 let progressWriteQueue = Promise.resolve();
@@ -148,7 +148,7 @@ const server = http.createServer((request, response) => {
 
 server.listen(port, host, () => {
   console.log(`ML Study Lab is running at http://localhost:${port}`);
-  console.log(`LAN access is enabled on port ${port}`);
+  console.log(`Listening on ${host}:${port}`);
 });
 
 server.on('error', (error) => {
