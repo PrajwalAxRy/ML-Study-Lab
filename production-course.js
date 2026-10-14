@@ -134,6 +134,92 @@ Budget the extra load. A backfill can compete with regular jobs and overload a d
       pitfalls: ['Using the current time to select data for a historical retry.', 'Appending the same interval again on every retry.', 'Letting a backfill overwrite current serving features without time/version checks.'],
       checkpoint: { question: 'A failed daily task is rerun for the same date. What should its output contract guarantee?', options: ['A consistent logical output without duplicate effects from the retry', 'A larger row count every time it runs', 'Automatic promotion of old values over current online features'], correct: 0, explanations: ['Correct. Retry-safe behavior is central to reliable scheduled pipelines.', 'Growing output under identical inputs can indicate duplicate writes.', 'Historical recomputation and current serving-state publication need separate controls.'] }
     },
+    {
+      id: 'prod-streaming', phase: 'Follow the data', title: 'Streaming, event time, duplicates, and recovery', minutes: 9,
+      subtitle: 'Understand what delivery guarantees actually cover.', bridge: [8, 17, 25], sources: ['kafkaDesign', 'flink', 'watermarks'],
+      blocks: [
+        { title: 'Event time and arrival time differ', body: `Event time records when something happened; ingestion or processing time records when the platform saw or handled it. A mobile event can arrive late after a connection resumes. Sorting by arrival time can distort a time-window feature.
+
+A windowed processor maintains state and uses a watermark as an event-time progress signal. A bounded-lateness policy is an assumption about arriving records, not proof that no older event can ever arrive. Define what happens to late events: update a result, route them for correction, or discard under a documented policy.
+
+Check source clocks, time zones, idle partitions, and state growth. One delayed partition can hold back progress. A short-lateness threshold improves speed at a possible completeness cost; a very long threshold retains more state and delays finalization.` },
+        { title: 'At-least-once needs retry-safe effects', body: `At-most-once can lose work; at-least-once can repeat it. “Exactly once” must specify its scope: broker writes, processor-managed state, or end-to-end observable effects. Checkpointing internal state does not automatically make an external database increment exactly once.
+
+If a consumer writes an effect and crashes before acknowledging progress, it may repeat the event. Idempotent writes, deduplication tied atomically to the effect, or a coordinated transactional boundary can address that failure. An unconditional counter increment is not idempotent.
+
+The PostgreSQL example illustrates a unique event-ID sink only. It does not by itself atomically update a second table or commit a broker offset. A later aggregate update must also be tied to accepted unique records or use a suitable transaction/checkpoint design.`, codeLabel: 'Illustrative PostgreSQL idempotent event write', code: `INSERT INTO ingestion_events
+  (event_id, entity_id, event_time, received_at, event_type)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (event_id) DO NOTHING;
+-- Requires a UNIQUE or PRIMARY KEY constraint on event_id.
+-- Parameters are bound, not concatenated from untrusted input.` },
+        { title: 'Make replay and quarantine explicit', body: `Record source positions and checkpoint relevant state. A replay is only possible while the source or archive retains the needed records. Track retention, not just whether a broker is running.
+
+Send invalid or unprocessable records to a quarantine or dead-letter path with reason and safe diagnostic metadata. Alert and establish reprocessing ownership; a dead-letter queue that nobody reads silently loses usable data.
+
+Test failure between reading, writing, and committing. Check whether sink effects repeat, state resumes correctly, and late corrections preserve feature semantics. End-to-end guarantees depend on compatible sources and sinks plus configuration, not on selecting a framework name.` }
+      ],
+      prompt: 'Explain why streaming counts can double after a crash and how you would reason about recovery guarantees.',
+      answer: `“A consumer may apply an effect and crash before recording progress, causing replay. I would define the end-to-end boundary, use stable event IDs and retry-safe or transactional sink effects, and test failures around commits. I would separately handle event time, late data, checkpointed state, retention, and quarantine, rather than assume processor-level exactly-once covers every external write.”`,
+      pitfalls: ['Claiming “exactly once” without naming the boundary and sink behavior.', 'Assuming a watermark makes late events impossible.', 'Putting bad records in a queue without monitoring or replay ownership.'],
+      checkpoint: { question: 'Which operation is not inherently idempotent under event replay?', options: ['Upserting a fixed event by its unique ID', 'Setting a version-checked value to the same payload', 'Incrementing a counter for every delivery with no deduplication'], correct: 2, explanations: ['A well-defined unique-ID upsert can make repeated writes have one logical effect.', 'A correctly designed repeated state assignment can be retry-safe.', 'Correct. Repeated delivery can increment the same logical event multiple times.'] }
+    },
+    {
+      id: 'prod-storage', phase: 'Choose storage and features', title: 'Which databases and storage systems, and why?', minutes: 10,
+      subtitle: 'Match each access pattern to a role instead of choosing one database for everything.', bridge: [9, 25], sources: ['postgres', 'objectStorage', 'warehouse', 'dynamodb', 'redis'],
+      blocks: [
+        { title: 'Ask about reads, writes, and guarantees', body: `There is no single database that every ML system should use. Start with the access pattern: point lookup or large scan, row updates or append-heavy events, transactions or approximate retrieval, historical queries or fresh serving values. Then ask about size, latency, consistency, durability, privacy, and operating capacity.
+
+A relational database is often a good starting point for catalog and application records with keys, constraints, and transactions. Analytical processing over large histories may call for columnar tables, a warehouse, or a lake with an appropriate query engine. Low-latency feature retrieval often uses indexed key-based access.
+
+Keep roles separate in your reasoning even if one small deployment serves several roles. Starting with PostgreSQL and files is reasonable at modest scale. Adding five distributed systems without a requirement increases operational burden and more ways to fail.` },
+        { title: 'A practical role-to-storage map', body: `The examples below are options, not a prescribed stack or a claim about any company's infrastructure. Performance depends on configuration and workload. “SQL versus NoSQL” is too coarse to determine latency, correctness, or scalability.
+
+An object store is not just a table database; a broker is not your entire historical warehouse; a feature store is a platform pattern rather than necessarily a new storage engine. Redis can be configured with different persistence behaviors, so do not call every deployment either fully durable or disposable.`, table: {
+          caption: 'Storage roles and example choices', headers: ['Role', 'Examples', 'Why it fits', 'Trade-off to check'], rows: [
+            ['Application/catalog truth', 'PostgreSQL or MySQL', 'Transactions, constraints, indexed records, flexible SQL', 'Write capacity, query plans, replica lag, backup/restore'],
+            ['Durable event buffer', 'Kafka or managed event log', 'Replayable partitioned streams and independent consumers', 'Retention, ordering scope, key skew, operational cost'],
+            ['Raw history and artifacts', 'S3, GCS, Azure Blob, or compatible object storage', 'Durable file/object storage for datasets and model artifacts', 'Layout, governance, retention, query engine, request/transfer cost'],
+            ['Analytical SQL', 'BigQuery, Snowflake, Redshift; ClickHouse for suitable analytical workloads', 'Columnar scans, aggregations, large historical joins', 'Freshness, concurrency, scan cost, workload-specific ingestion'],
+            ['Online feature lookup', 'Redis, DynamoDB, Bigtable, Cassandra, or suitable indexed SQL', 'Entity-key retrieval and chosen latency/scaling properties', 'Consistency, hot keys, TTL, durability, item-size limits'],
+            ['Document-oriented records', 'MongoDB or relational JSON capabilities', 'Document access and flexible nested attributes', 'Constraints, indexes, update patterns, schema discipline'],
+            ['Lexical/vector retrieval', 'Elasticsearch/OpenSearch, pgvector, or specialized vector index', 'Text search or nearest-neighbor candidate lookup', 'Index freshness, filters, approximation recall, memory and update cost']
+          ]
+        } },
+        { title: 'Choose the smallest system that meets the need', body: `For a toy recommendation prototype, store app metadata in PostgreSQL, write immutable training snapshots to files or object storage, and use scheduled features. If online lookups fit an index and the measured load, you may not need a separate distributed key-value store.
+
+Introduce a warehouse when analytical joins and scans justify it, a broker when asynchronous durable event flow or replay is needed, and a dedicated online store when latency or throughput demands it. These are conditional decisions, not maturity badges.
+
+Name the authoritative source and derived copies. Search indexes and caches often need rebuilding from truth. Establish deletion propagation and version compatibility across copies. A storage choice is only complete when you explain how it is updated, queried, recovered, and retired.` }
+      ],
+      prompt: 'Choose storage roles for catalog metadata, historical training data, and low-latency features. Explain the access pattern behind each choice.',
+      answer: `“I would use transactional indexed storage for authoritative catalog records, durable files or analytical tables for large historical computation, and an appropriate entity-key serving store for online features if required. Exact products depend on workload and guarantees. I would start simply, measure bottlenecks, and account for source-of-truth ownership, freshness, recovery, retention, and operating cost.”`,
+      pitfalls: ['Choosing one database purely because it is called NoSQL.', 'Using a warehouse scan for each deadline-sensitive feature request.', 'Calling a broker, object store, or feature platform interchangeable databases.'],
+      checkpoint: { question: 'Which workload most naturally fits an analytical warehouse rather than a request-time key lookup?', options: ['Fetching one small user feature vector under a strict deadline', 'Aggregating months of events across many users for training', 'Checking one app’s availability by primary key'], correct: 1, explanations: ['A keyed serving path is generally more appropriate for that access pattern.', 'Correct. Large historical scans and joins are analytical workloads.', 'A small indexed application lookup need not require a warehouse.'] }
+    },
+    {
+      id: 'prod-data-modeling', phase: 'Choose storage and features', title: 'Keys, indexes, partitions, and database scaling', minutes: 8,
+      subtitle: 'Design the data layout around the queries the system must answer.', bridge: [9, 25], sources: ['postgres', 'partitioning', 'dynamodb'],
+      blocks: [
+        { title: 'Identity and the read pattern', body: `A primary key identifies a row and helps enforce uniqueness. An index supplies an access path for selected queries, at a cost in storage and write work. An index on entity and time can support recent-history lookup; indexing every field is not automatically useful.
+
+Define stable IDs, timestamp meaning, null handling, and schema evolution. Separate catalog records from append-heavy interaction history. Document flexibility does not remove the need for a contract. Inspect query plans and measured workloads rather than assume a database label predicts performance.` },
+        { title: 'Partitions, replicas, and shards', body: `Partitioning divides a logical dataset, for example by date or entity hash. It can reduce scan work and simplify retention when queries align with the layout. It does not inherently distribute every partition across separate machines.
+
+Sharding distributes data ownership across nodes or storage units. A routing key determines where a record goes; skew can overload one shard. A read replica supplies another copy for suitable reads, but may lag and does not automatically increase primary write capacity.
+
+Date partitioning can fit analytical history. Entity-key layout can fit serving lookups. A poorly chosen low-cardinality key can create a hot partition. State which bottleneck the proposed layout addresses.` },
+        { title: 'Measure before distributing', body: `Start with appropriate indexes, query optimization, connection pooling, bounded concurrency, and compatible batched reads. N+1 feature requests create many round trips even if each query is fast. Then evaluate vertical capacity, replicas, or sharding under the actual consistency and load requirements.
+
+A transaction provides a stated correctness boundary, not a guarantee that all distributed copies instantly agree. Decide whether stale reads are acceptable for each field, especially policy and eligibility state.
+
+Plan backup and restore, migrations, deletion, and hotspot handling. Excellent average throughput does not make an untested recovery design adequate. Benchmark representative peaks and query mixtures, including the cost of simultaneous backfills.` }
+      ],
+      prompt: 'Distinguish a primary key, index, partition, replica, and shard, then explain what you would measure before scaling.',
+      answer: `“I would model identity and access patterns, enforce keys, and choose indexes by measured query and write cost. Partitions divide data, replicas copy it with defined lag, and shards distribute ownership. I would measure query plans, round trips, connection pressure, hotspots, and recovery before selecting a scaling mechanism.”`,
+      pitfalls: ['Claiming every partition is automatically on another machine.', 'Assuming read replicas scale all writes or have zero lag.', 'Adding indexes without checking their write cost.'],
+      checkpoint: { question: 'Why might a read replica be unsuitable for strict current availability?', options: ['Replicas cannot execute queries', 'Replica lag may expose stale eligibility state', 'Indexes never work on replicas'], correct: 1, explanations: ['Replicas can serve appropriate reads.', 'Correct. The consistency and freshness contract must match the decision.', 'Index availability is not the general issue here.'] }
+    },
   ],
   cases: [
   ]
