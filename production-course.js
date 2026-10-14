@@ -220,6 +220,81 @@ Plan backup and restore, migrations, deletion, and hotspot handling. Excellent a
       pitfalls: ['Claiming every partition is automatically on another machine.', 'Assuming read replicas scale all writes or have zero lag.', 'Adding indexes without checking their write cost.'],
       checkpoint: { question: 'Why might a read replica be unsuitable for strict current availability?', options: ['Replicas cannot execute queries', 'Replica lag may expose stale eligibility state', 'Indexes never work on replicas'], correct: 1, explanations: ['Replicas can serve appropriate reads.', 'Correct. The consistency and freshness contract must match the decision.', 'Index availability is not the general issue here.'] }
     },
+    {
+      id: 'prod-offline-features', phase: 'Choose storage and features', title: 'Historical features and point-in-time training data', minutes: 9,
+      subtitle: 'Reconstruct what the system would actually have known.', bridge: [2, 8, 9], sources: ['feast'],
+      blocks: [
+        { title: 'Every example has a prediction time', body: `A training row identifies the entity, prediction time, available features, and later outcome. A seven-day count for a request at t must use the intended window before t, not the latest history when training runs.
+
+An event can occur before t but arrive after t, so the live system could not have used it. Distinguish event time from availability time or use historical snapshots that encode availability. Event_time before t alone does not establish what was known then.
+
+Decide whether your evaluation describes eventual complete history or original request-time knowledge. These are different claims, especially during pipeline delay and mobile disconnection.` },
+        { title: 'Separate features from future labels', body: `For a seven-day feature, select events in the defined interval before the prediction and enforce the intended availability contract. Join on the correct entity, handle empty histories consistently, and avoid duplicate source rows.
+
+Labels can look forward: whether an attributed outcome occurred in a later window. Keep that future window out of input features and allow labels to mature. A missing recent conversion may still occur later.
+
+A point-in-time join picks a historically appropriate feature value, not simply the latest row. Verify whether the feature timestamp denotes source event time, computation time, or actual serving availability. These timestamps are not interchangeable.` },
+        { title: 'Version and validate the dataset', body: `Record source snapshots or intervals, transformation versions, feature schemas, entity keys, and quality results. An immutable output path is insufficient if the generating query silently reads changing tables.
+
+Check duplicates, missingness, ranges, distributions, time coverage, and label maturity. Fit preprocessing on training data only. Compare offline and served values on representative requests where permitted; a matching schema can hide different semantics.
+
+Publish backfills separately and validate before promotion. If a feature definition changes, evaluate and train a compatible model rather than substitute new semantics under old weights. A feature platform can help organize this workflow but cannot supply correct contracts automatically.` }
+      ],
+      prompt: 'Explain point-in-time correctness using an event that arrived late and an outcome observed after prediction.',
+      answer: `“I would reconstruct each example from the intended past window and data available at its prediction time. An earlier event that arrived later may be unavailable to the original decision. Future outcomes form mature labels, not inputs. I would version source snapshots and feature definitions and compare historical and serving values.”`,
+      pitfalls: ['Joining historical requests to the latest features.', 'Assuming an earlier event timestamp proves earlier availability.', 'Treating immature labels as known negatives.'],
+      checkpoint: { question: 'An event occurred at 09:00 but became available at 11:00. Should it enter strict features served at 10:00?', options: ['Yes, because it occurred before 10:00', 'Always, because complete data is better', 'No, it was unavailable to that decision'], correct: 2, explanations: ['Occurrence and availability differ.', 'Hindsight changes the evaluation claim.', 'Correct. Strict serving-time reconstruction respects what was knowable then.'] }
+    },
+    {
+      id: 'prod-online-features', phase: 'Choose storage and features', title: 'Online features, feature stores, and caching', minutes: 8,
+      subtitle: 'Retrieve consistent, fresh values without scanning history.', bridge: [9, 25], sources: ['feast', 'redis'],
+      blocks: [
+        { title: 'Historical and serving access differ', body: `Offline retrieval needs feature history for many entities and times. Online retrieval often needs current compatible values for a small set of keys within a deadline. A feature platform can define computation, track metadata, retrieve historical values, and materialize online values; it is not necessarily one database.
+
+Serving choices include key-value stores, caches, and suitable indexed relational tables. Choose by key size, throughput, freshness, consistency, durability, and operating cost. A fast response containing incompatible values is not good serving.
+
+At small scale, shared indexed storage may meet the need. Introduce a separate online component when its benefits justify synchronization and recovery complexity.` },
+        { title: 'Specify version and freshness', body: `Return feature-definition version, entity key, and relevant value and materialization timestamps. Event freshness and pipeline delay differ. Set acceptable age per feature; not every attribute needs the same update cadence.
+
+Prevent old retries or backfills from overwriting newer online state using an appropriate source-version or timestamp ordering contract. A cache TTL limits expiry of the entry, not necessarily the age of its source evidence.
+
+Historical and online transformations should agree on normalization, null handling, category encoding, and windows. Test representative request snapshots to locate training-serving skew; schema equality alone does not prove semantic consistency.` },
+        { title: 'Handle misses and recovery deliberately', body: `Define cache keys, authoritative sources, invalidation, eviction, and miss behavior. Personalized cached results must account for permitted context, model version, and eligibility. Avoid a stampede by bounding refresh concurrency or coordinating refreshes where appropriate.
+
+Unlimited fallback reads and retries can overload a failing source. Apply deadlines, bounded concurrency, and a validated stale-value, default-feature, or non-personalized fallback depending on product risk.
+
+Do not call a cache disposable if it is the only copy of required state. Redis durability depends on configuration. Test restoration or rebuilding and monitor missingness, value age, and fallback rates as well as lookup latency.` }
+      ],
+      prompt: 'Define an online feature contract and what happens on stale values, a miss, or a timeout.',
+      answer: `“I would retrieve keyed values with version and freshness metadata, keep historical and served semantics consistent, and reject incompatible or improperly ordered updates. I would define cache keys and invalidation and bound miss and retry behavior. The fallback and recovery path would match the feature’s actual product risk.”`,
+      pitfalls: ['Equating cache write time with source freshness.', 'Changing feature meaning beneath an old model.', 'Sending unlimited fallback reads to a broken source.'],
+      checkpoint: { question: 'A cache was written one second ago from yesterday’s data. Is the feature necessarily fresh?', options: ['No; source age and cache write age differ', 'Yes; TTL always proves source freshness', 'Yes; fast reads imply recent data'], correct: 0, explanations: ['Correct. Track source/value freshness separately.', 'Expiry does not by itself establish recent evidence.', 'Latency and freshness are distinct properties.'] }
+    },
+    {
+      id: 'prod-training', phase: 'Train and serve', title: 'Training pipelines, artifacts, and model registries', minutes: 8,
+      subtitle: 'Make an evaluated model reproducible and deployable.', bridge: [2, 11, 21, 25], sources: ['registry'],
+      blocks: [
+        { title: 'A run includes data and evaluation', body: `Record source snapshots, dataset construction, splits, feature definitions, preprocessing, parameters, code revision, and runtime environment. Log metrics and important slices with these inputs. Seeds help but do not guarantee identical results across every hardware or distributed configuration.
+
+Check data before spending compute. Evaluate quality, calibration where relevant, supported cohorts, and serving cost. A completed run is not permission to promote its model.
+
+Automate repeatable steps and define promotion policy. Scheduled retraining is useful in some products, but it cannot repair an invalid source contract or guarantee fresh online features.` },
+        { title: 'Package the deployable unit', body: `A model package can include weights, preprocessing, input/output schemas, feature-version requirements, thresholds, and dependencies. Validate loading and prediction on representative inputs, empty data, and malformed requests.
+
+Store artifacts durably with integrity checks, access controls, and lineage. A registry links versions and evaluation metadata. A mutable alias such as “current” is a routing convenience, not immutable provenance.
+
+Record the exact artifact version used for relevant decisions where permitted. If the alias moves tomorrow, you still need to know which model and compatible features produced today's outcome. Keep a last-known-good package for rollback.` },
+        { title: 'Scale training separately from serving', body: `Use efficient data loading, formats, batching, and measured CPU/GPU resources. Distributed training adds communication, synchronization, checkpoint, and input-pipeline complexity. More devices do not guarantee proportional speedup.
+
+Separate large training jobs from deadline-sensitive serving capacity. Retry or resume from compatible checkpoints, budgeting dataset reads and artifact publication as well as model compute.
+
+Coordinate features and retrieval embeddings with model versions. A new user/query encoder against an incompatible old item index can fail despite good offline evaluation. Promotion gates should test the whole compatible serving package, not just its weights.` }
+      ],
+      prompt: 'What must be versioned and packaged so a model can be reproduced, served, and rolled back?',
+      answer: `“I would version data construction, snapshots, features, preprocessing, code, environment, and evaluation. The package must load with a compatible schema and dependencies. A registry tracks immutable artifacts and movable aliases, while promotion tests and a last-known-good package provide an explicit deployment and rollback path.”`,
+      pitfalls: ['Saving only weights without preprocessing.', 'Treating a mutable alias as historical provenance.', 'Promoting every completed training run.'],
+      checkpoint: { question: 'Why record an immutable version as well as a current alias?', options: ['Aliases cannot route requests', 'Aliases move; earlier predictions need exact provenance', 'Feature compatibility never matters'], correct: 1, explanations: ['Aliases can be useful routing handles.', 'Correct. Historical decisions need the version actually served.', 'Schema and feature compatibility still matter.'] }
+    },
   ],
   cases: [
   ]
